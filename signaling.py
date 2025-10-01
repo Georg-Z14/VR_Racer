@@ -16,8 +16,7 @@ async def offer(request):
 
     # Quelle auswählen: Webcam oder RTSP
     pc.addTrack(CameraStream(0))
-    # Beispiel für RTSP:
-    # pc.addTrack(CameraStream("rtsp://184.72.239.149/vod/mp4:BigBuckBunny_175k.mov"))
+
 
     await pc.setRemoteDescription(offer)
     answer = await pc.createAnswer()
