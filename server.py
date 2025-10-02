@@ -6,60 +6,62 @@ from camera_stream import CameraStream
 
 pcs = set()
 
-# ---- WebRTC Offer ----
+# 🔑 Festes Passwort
+ADMIN_PASSWORD = "Hallo123!"
+
+# ---------- Offer ----------
 async def offer(request):
+    # Passwort prüfen
+    pw = request.headers.get("Authorization", "")
+    if pw != ADMIN_PASSWORD:
+        return web.Response(status=403, text="Unauthorized")
+
     params = await request.json()
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
 
     pc = RTCPeerConnection()
     pcs.add(pc)
 
-    # Remote Description vom Browser setzen
     await pc.setRemoteDescription(offer)
-
-    # Kamera-Track hinzufügen (das reicht, kein Transceiver nötig)
     pc.addTrack(CameraStream())
 
-    # Answer erzeugen
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
 
-    return web.Response(
-        content_type="application/json",
-        text=json.dumps(
-            {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
-        ),
+    return web.json_response(
+        {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
     )
 
+# ---------- Login ----------
+async def login(request):
+    data = await request.json()
+    if data.get("password") == ADMIN_PASSWORD:
+        return web.Response(status=200, text="OK")
+    return web.Response(status=403, text="Wrong password")
 
-# ---- Shutdown ----
-async def on_shutdown(app):
-    for pc in pcs:
-        for sender in pc.getSenders():
-            track = sender.track
-            if track and isinstance(track, CameraStream):
-                track.stop()
-        await pc.close()
-    pcs.clear()
-
-# ---- Static Routes ----
+# ---------- Static ----------
 async def index(request):
     return web.FileResponse("index1.html")
 
 async def javascript(request):
     return web.FileResponse("client1.js")
 
-# ---- Main App ----
+# ---------- Shutdown ----------
+async def on_shutdown(app):
+    for pc in pcs:
+        await pc.close()
+    pcs.clear()
+
+# ---------- App ----------
 def create_app():
     app = web.Application()
     app.router.add_get("/", index)
     app.router.add_get("/client1.js", javascript)
     app.router.add_post("/offer", offer)
-    app.on_shutdown.append(on_shutdown)
+    app.router.add_post("/login", login)
     app.router.add_static("/static/", path="static", name="static")
+    app.on_shutdown.append(on_shutdown)
     return app
 
-
 if __name__ == "__main__":
-    app = create_app()
-    web.run_app(app, host="127.0.0.1", port=8080)
+    web.run_app(create_app(), host="127.0.0.1", port=8080)
