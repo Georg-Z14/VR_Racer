@@ -26,23 +26,27 @@ async function login() {
 }
 
 // -------------------------
-// 🔹 WebRTC
+// 🔹 WebRTC Setup
 // -------------------------
 const video = document.getElementById("video");
 const status = document.getElementById("status");
 const hud = document.querySelector(".hud");
 
-const pc = new RTCPeerConnection();
-pc.addTransceiver("video", { direction: "recvonly" });
-
-pc.ontrack = (event) => {
-    video.srcObject = event.streams[0];
-    monitorFPS(video);
-};
+let pc;
 
 async function start() {
     try {
         status.innerText = "🔄 Verbinde...";
+        pc = new RTCPeerConnection({
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }] // STUN für Internet/NAT
+        });
+
+        pc.addTransceiver("video", { direction: "recvonly" });
+
+        pc.ontrack = (event) => {
+            video.srcObject = event.streams[0];
+            monitorFPS(video);
+        };
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);

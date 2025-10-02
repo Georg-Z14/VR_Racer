@@ -2,9 +2,12 @@ import asyncio
 import json
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc.contrib.media import MediaRelay
 from camera_stream import CameraStream
 
 pcs = set()
+relay = MediaRelay()   # Relay-Instanz erzeugen
+camera = CameraStream()  # nur einmal erzeugen!
 
 # 🔑 Festes Passwort
 ADMIN_PASSWORD = "Hallo123!"
@@ -23,7 +26,9 @@ async def offer(request):
     pcs.add(pc)
 
     await pc.setRemoteDescription(offer)
-    pc.addTrack(CameraStream())
+
+    # Kamera-Stream mit Relay teilen
+    pc.addTrack(relay.subscribe(camera))
 
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
@@ -64,4 +69,4 @@ def create_app():
     return app
 
 if __name__ == "__main__":
-    web.run_app(create_app(), host="127.0.0.1", port=8080)
+    web.run_app(create_app(), host="172.20.10.3", port=8080)  # für Freunde erreichbar
