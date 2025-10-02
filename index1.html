@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="de">
 <head>
@@ -119,7 +118,7 @@
         }
 
         #toggle-password {
-            height: 50px;   /* etwas kleiner für optischen Ausgleich */
+            height: 50px;
             width: 50px;
             border-radius: 8px;
             border: 2px solid var(--primary);
@@ -127,13 +126,11 @@
             color: var(--text-light);
             cursor: pointer;
             font-size: 1.3em;
-
             display: flex;
             align-items: center;
             justify-content: center;
-
             position: relative;
-            bottom: 4.5px;
+            top: -5px;
         }
 
         button {
@@ -237,6 +234,7 @@
         <div class="controls">
             <button onclick="restartStream()">🔄 Neu verbinden</button>
             <button onclick="toggleFullscreen()">🖥 Vollbild</button>
+            <button onclick="toggleView()">👓 Ansicht wechseln</button> <!-- NEU -->
         </div>
     </div>
 

@@ -1,4 +1,5 @@
 let authPassword = null;
+let vrMode = false; // VR Modus an/aus
 
 // -------------------------
 // 🔑 Login
@@ -15,7 +16,6 @@ async function login() {
     if (res.status === 200) {
         authPassword = pw;
 
-        // Login Card ausblenden, Stream Card einblenden
         document.getElementById("login-card").style.display = "none";
         document.getElementById("stream-card").style.display = "block";
 
@@ -38,7 +38,7 @@ async function start() {
     try {
         status.innerText = "🔄 Verbinde...";
         pc = new RTCPeerConnection({
-            iceServers: [{ urls: "stun:stun.l.google.com:19302" }] // STUN für Internet/NAT
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
         });
 
         pc.addTransceiver("video", { direction: "recvonly" });
@@ -143,8 +143,25 @@ function toggleFullscreen() {
 function restartStream() { location.reload(); }
 
 // -------------------------
-// 👁️ Passwort anzeigen/ausblenden
-// + Enter-Taste zum Login
+// 👓 Ansicht wechseln (VR / Normal)
+// -------------------------
+function toggleView() {
+    vrMode = !vrMode;
+    if (vrMode) {
+        video.style.width = "50%";
+        video.style.display = "inline-block";
+        video.style.transform = "scale(1.2)";
+        status.innerText = "👓 VR-Modus aktiv";
+    } else {
+        video.style.width = "100%";
+        video.style.display = "block";
+        video.style.transform = "none";
+        status.innerText = "🖥 Normal-Modus";
+    }
+}
+
+// -------------------------
+// 👁️ Passwort anzeigen
 // -------------------------
 document.addEventListener("DOMContentLoaded", () => {
     const pwInput = document.getElementById("password");
