@@ -37,10 +37,10 @@ async def on_shutdown(app):
 
 async def index(request):
     """Standardseite: index1.html ausliefern."""
-    return web.FileResponse("index1.html")
+    return web.FileResponse("templates/index1.html")
 
 async def javascript(request):
-    return web.FileResponse("client1.js")
+    return web.FileResponse("static/js/client1.js")
 
 def create_app():
     app = web.Application()

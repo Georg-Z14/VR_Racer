@@ -46,10 +46,10 @@ async def login(request):
 
 # ---------- Static ----------
 async def index(request):
-    return web.FileResponse("index1.html")
+    return web.FileResponse("templates/index1.html")
 
 async def javascript(request):
-    return web.FileResponse("client1.js")
+    return web.FileResponse("static/js/client1.js")
 
 # ---------- Shutdown ----------
 async def on_shutdown(app):

@@ -1,0 +1,297 @@
+:root {
+  --primary: #00e0ff;
+  --secondary: #ff007a;
+  --bg-dark: #0d0d0d;
+  --bg-card: rgba(26,26,26,0.7);
+  --text-light: #e0e0e0;
+  --gradient: linear-gradient(135deg, #00e0ff, #ff007a);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: "Segoe UI", Roboto, sans-serif;
+  background: #000;
+  color: var(--text-light);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  padding: 20px;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Tron Grid */
+body::before {
+  content: "";
+  position: fixed;
+  top: 0; left: 0;
+  width: 200%; height: 200%;
+  background: repeating-linear-gradient(
+    0deg, rgba(0,224,255,0.1) 0px, rgba(0,224,255,0.1) 2px, transparent 2px, transparent 50px
+  ),
+  repeating-linear-gradient(
+    90deg, rgba(0,224,255,0.1) 0px, rgba(0,224,255,0.1) 2px, transparent 2px, transparent 50px
+  );
+  animation: moveGrid 20s linear infinite;
+  z-index: -1;
+}
+
+@keyframes moveGrid {
+  from { transform: translate(0,0); }
+  to { transform: translate(-100px,-100px); }
+}
+
+.logo {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 3px solid var(--primary);
+  box-shadow: 0 0 25px rgba(0,224,255,0.8);
+  margin-bottom: 15px;
+  animation: pulse 3s infinite alternate;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 25px;
+}
+
+h1 {
+  font-size: 3em;
+  font-weight: 700;
+  color: var(--primary);
+  text-shadow: 0 0 25px rgba(0,224,255,0.8), 0 0 45px rgba(0,224,255,0.5);
+}
+
+.card {
+  background: var(--bg-card);
+  border-radius: 20px;
+  padding: 25px;
+  box-shadow: 0 0 50px rgba(0,224,255,0.25);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 900px;
+  backdrop-filter: blur(12px);
+  margin-bottom: 20px;
+}
+
+/* -----------------
+   Moderner Login
+----------------- */
+#login-card {
+  background: linear-gradient(135deg, rgba(0,224,255,0.1), rgba(255,0,122,0.1));
+  border-radius: 20px;
+  padding: 40px 30px;
+  box-shadow: 0 0 35px rgba(0,224,255,0.25);
+  text-align: center;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+#login-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 0 45px rgba(255,0,122,0.4);
+}
+
+#login-card h2 {
+  font-size: 1.8em;
+  font-weight: bold;
+  color: var(--primary);
+  margin-bottom: 25px;
+  text-shadow: 0 0 15px var(--primary), 0 0 25px rgba(255,0,122,0.6);
+}
+
+.password-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: 350px;
+  margin: 0 auto 20px auto;
+  position: relative;
+}
+
+#password {
+  flex: 1;
+  height: 55px;
+  border-radius: 10px;
+  border: 2px solid var(--primary);
+  background: #111;
+  color: var(--text-light);
+  font-size: 1.1em;
+  padding: 0 16px;
+  outline: none;
+  transition: all 0.3s ease;
+  box-shadow: inset 0 0 10px rgba(0,224,255,0.2);
+}
+
+#password:focus {
+  border-color: var(--secondary);
+  box-shadow: 0 0 15px var(--secondary), inset 0 0 10px rgba(255,0,122,0.2);
+}
+
+#toggle-password {
+  height: 55px;
+  width: 55px;
+  border-radius: 10px;
+  border: 2px solid var(--primary);
+  background: #1a1a1a;
+  color: var(--text-light);
+  cursor: pointer;
+  font-size: 1.4em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+    position: relative;
+    top: -5px
+}
+
+#toggle-password:hover {
+  border-color: var(--secondary);
+  box-shadow: 0 0 15px var(--secondary);
+}
+
+/* Login-Button modern */
+#login-card button {
+  background: var(--gradient);
+  border: none;
+  border-radius: 12px;
+  padding: 14px 32px;
+  font-size: 1.1em;
+  font-weight: bold;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 0 25px rgba(0,224,255,0.35);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  margin-top: 15px;
+}
+
+#login-card button:hover {
+  transform: scale(1.08);
+  box-shadow: 0 0 35px var(--secondary);
+}
+
+#login-status {
+  margin-top: 10px;
+  font-weight: bold;
+  color: var(--secondary);
+}
+
+/* Stream */
+.live-badge {
+  position: absolute;
+  top: 15px;
+  left: 15px;
+  background: red;
+  color: white;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-weight: bold;
+  box-shadow: 0 0 15px red;
+}
+
+video {
+  width: 100%;
+  border-radius: 14px;
+  border: 3px solid var(--primary);
+  background: #000;
+  box-shadow: 0 0 25px rgba(0,224,255,0.7);
+}
+
+/* HUD + Controls unten */
+.bottom-bar {
+  width: 100%;
+  display: flex;
+  justify-content: space-between; /* links / rechts */
+  align-items: center;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.controls {
+  display: flex;
+  gap: 15px;
+  justify-content: flex-start;
+}
+
+.controls button {
+  min-width: 160px; /* gleich breite Buttons */
+  text-align: center;
+  background: var(--gradient);
+  border: none;
+  border-radius: 12px;
+  padding: 14px 28px;
+  font-size: 1em;
+  font-weight: bold;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 0 20px rgba(0,224,255,0.35);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.controls button:hover {
+  transform: scale(1.08);
+  box-shadow: 0 0 30px var(--secondary);
+}
+
+.hud {
+  font-size: 1em;
+  color: var(--primary);
+  font-weight: bold;
+  text-shadow: 0 0 10px var(--primary);
+  margin-right: 5px;
+  white-space: nowrap;
+}
+
+footer {
+  margin-top: 25px;
+  font-size: 0.9em;
+  color: #888;
+  text-align: center;
+}
+
+@keyframes pulse {
+  from { transform: scale(1); }
+  to   { transform: scale(1.08); }
+}
+
+/* -----------------
+   Tron Cars
+----------------- */
+.car-bg {
+  position: fixed;
+  inset: 0;           /* top:0; right:0; bottom:0; left:0 */
+  overflow: hidden;
+  z-index: -2;        /* hinter dem Tron-Grid */
+  pointer-events: none; /* keine Klicks blocken */
+}
+
+.tron-car {
+  position: absolute;
+  width: 110px;
+  height: 56px;
+  border: 3px solid var(--primary);
+  border-radius: 14px;
+  background: rgba(0,224,255,0.08);
+  box-shadow: 0 0 22px var(--primary), inset 0 0 16px var(--primary);
+  transform-origin: 50% 50%;
+}
+
+/* Räder */
+.tron-car::before,
+.tron-car::after {
+  content: "";
+  position: absolute;
+  bottom: -12px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 3px solid var(--secondary);
+  box-shadow: 0 0 15px var(--secondary), inset 0 0 10px var(--secondary);
+}
+.tron-car::before { left: 10px; }
+.tron-car::after  { right: 10px; }
