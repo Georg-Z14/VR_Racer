@@ -72,7 +72,7 @@ async def set_quality(request):
 # ---------- Bewegung ----------
 async def motion_status(request):
     """Sendet True/False, ob Bewegung erkannt wurde."""
-    return web.json_response({"motion": camera.motion_detected})
+    return web.json_response({"motion": bool(camera.motion_detected)})
 
 # ---------- Login ----------
 async def login(request):
@@ -112,4 +112,4 @@ def create_app():
     return app
 
 if __name__ == "__main__":
-    web.run_app(create_app(), host="192.168.178.114", port=8080)
+    web.run_app(create_app(), host="192.168.178.159", port=8080)
