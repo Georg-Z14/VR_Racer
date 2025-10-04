@@ -45,7 +45,7 @@
     <button type="button" id="toggle-new-password">👁️</button>
   </div>
 
-  <button onclick="register()">Registrieren</button>
+  <button onclick="registerUser()">Registrieren</button>
   <p id="register-status"></p>
   <p class="switch-text">Schon ein Konto?
     <a href="#" class="switch-link" onclick="switchToLogin()">Zurück zum Login</a>
@@ -61,6 +61,19 @@
     <p id="status">🔄 Verbinde...</p>
     <div class="hud">📡 -- ms | 🎥 -- FPS</div>
   </div>
+</div>
+
+<!-- 👑 ADMIN PANEL -->
+<div id="admin-card" class="card" style="display:none;">
+  <h2>👑 Admin Panel</h2>
+  <p>Willkommen, Admin! Hier kannst du Benutzer verwalten.</p>
+
+  <div id="admin-list" class="admin-list">
+    <p>⏳ Lade Benutzer...</p>
+  </div>
+
+  <button onclick="loadAdminPanel()" class="refresh-btn">🔄 Aktualisieren</button>
+  <button onclick="location.reload()" class="back-btn">⬅️ Logout</button>
 </div>
 
 <footer>

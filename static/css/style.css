@@ -276,3 +276,73 @@ footer {
   color: #888;
   text-align: center;
 }
+
+/* ================================
+   👑 ADMIN PANEL STYLING
+================================ */
+#admin-card {
+  background: linear-gradient(135deg, rgba(0,224,255,0.15), rgba(255,0,122,0.15));
+  border-radius: 25px;
+  padding: clamp(40px, 5vw, 70px);
+  box-shadow: 0 0 45px rgba(0,224,255,0.3);
+  text-align: center;
+  width: min(95%, 750px);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  animation: fadeInUp 1s ease forwards;
+}
+
+.admin-list {
+  margin-top: 20px;
+  background: rgba(20,20,20,0.6);
+  border-radius: 10px;
+  padding: 15px;
+  max-height: 300px;
+  overflow-y: auto;
+  box-shadow: inset 0 0 15px rgba(0,224,255,0.2);
+}
+
+.user-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.user-row .username {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.delete-btn {
+  background: rgba(255,0,60,0.8);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.delete-btn:hover {
+  background: #ff0040;
+  box-shadow: 0 0 10px #ff0040;
+}
+
+.refresh-btn, .back-btn {
+  margin-top: 15px;
+  border: none;
+  border-radius: 8px;
+  background: var(--gradient);
+  color: white;
+  padding: 8px 20px;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(0,224,255,0.3);
+}
+.refresh-btn:hover, .back-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 25px var(--secondary);
+}

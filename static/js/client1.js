@@ -32,10 +32,25 @@ async function login() {
         card.style.display = "none";
         document.getElementById("stream-card").style.display = "block";
         start();
+      }, 700);
+    }
+    else if (res.status === 202) {
+      // 👑 Admin Login (Admin_G oder Admin_D)
+      card.classList.add("success");
+      status.textContent = "👑 Admin-Login erfolgreich!";
+      setTimeout(() => {
+        card.style.display = "none";
+        document.getElementById("admin-card").style.display = "block";
+        loadAdminPanel();
       }, 800);
-    } else {
+    }
+    else if (res.status === 403) {
       card.classList.add("error");
       status.textContent = "❌ Benutzername oder Passwort falsch!";
+    }
+    else {
+      card.classList.add("error");
+      status.textContent = "⚠️ Unbekannter Fehler beim Login!";
     }
   } catch {
     card.classList.add("error");
@@ -43,7 +58,7 @@ async function login() {
   }
 }
 
-async function register() {
+async function registerUser() {
   const username = document.getElementById("new-username").value.trim();
   const password = document.getElementById("new-password").value.trim();
   const card = document.getElementById("register-card");
@@ -70,11 +85,13 @@ async function register() {
       status.textContent = "✅ Benutzer erfolgreich angelegt!";
       setTimeout(() => {
         switchToLogin();
-      }, 1200);
-    } else if (res.status === 409) {
+      }, 1000);
+    }
+    else if (res.status === 409) {
       card.classList.add("error");
       status.textContent = "❌ Benutzername bereits vergeben!";
-    } else {
+    }
+    else {
       card.classList.add("error");
       status.textContent = "⚠️ Fehler bei der Registrierung!";
     }
@@ -93,6 +110,64 @@ function switchToRegister() {
 function switchToLogin() {
   document.getElementById("register-card").style.display = "none";
   document.getElementById("login-card").style.display = "block";
+}
+
+// ======================================================
+// 👑 ADMIN PANEL
+// ======================================================
+
+async function loadAdminPanel() {
+  const container = document.getElementById("admin-list");
+  container.innerHTML = "⏳ Lade Benutzer...";
+
+  try {
+    const res = await fetch("/admin/users");
+    if (!res.ok) {
+      container.innerHTML = "❌ Fehler beim Laden der Benutzerliste!";
+      return;
+    }
+
+    const users = await res.json();
+    if (users.length === 0) {
+      container.innerHTML = "<p>Keine Benutzer registriert.</p>";
+      return;
+    }
+
+    container.innerHTML = "";
+    users.forEach(u => {
+      const div = document.createElement("div");
+      div.className = "user-row";
+      div.innerHTML = `
+        <span class="username">${u.username}</span>
+        <button class="delete-btn" onclick="deleteUser(${u.id})">❌</button>
+      `;
+      container.appendChild(div);
+    });
+
+  } catch (err) {
+    console.error(err);
+    container.innerHTML = "⚠️ Serverfehler beim Laden!";
+  }
+}
+
+async function deleteUser(id) {
+  if (!confirm("Benutzer wirklich löschen?")) return;
+
+  try {
+    const res = await fetch("/admin/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id })
+    });
+
+    if (res.ok) {
+      loadAdminPanel();
+    } else {
+      alert("❌ Fehler beim Löschen des Benutzers!");
+    }
+  } catch {
+    alert("⚠️ Server nicht erreichbar!");
+  }
 }
 
 // ======================================================
@@ -299,8 +374,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const toggle = document.getElementById("toggle-password");
   if (toggle && pw) {
     toggle.addEventListener("click", () => {
-      pw.type = pw.type === "password" ? "text" : "password";
-      toggle.textContent = pw.type === "password" ? "👁️" : "🙈";
+      if (pw.type === "password") {
+        pw.type = "text";
+        toggle.textContent = "🙈";
+      } else {
+        pw.type = "password";
+        toggle.textContent = "👁️";
+      }
     });
   }
 
@@ -308,8 +388,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const ntoggle = document.getElementById("toggle-new-password");
   if (ntoggle && npw) {
     ntoggle.addEventListener("click", () => {
-      npw.type = npw.type === "password" ? "text" : "password";
-      ntoggle.textContent = npw.type === "password" ? "👁️" : "🙈";
+      if (npw.type === "password") {
+        npw.type = "text";
+        ntoggle.textContent = "🙈";
+      } else {
+        npw.type = "password";
+        ntoggle.textContent = "👁️";
+      }
     });
   }
 });
