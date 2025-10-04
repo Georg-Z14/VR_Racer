@@ -1,0 +1,91 @@
+# ============================================================================
+# Systemd Service für Raspberry Pi Kamera-System (MJPEG-Version)
+# Datei: /etc/systemd/system/camera_mjpeg.service
+# Version: 1.0
+# Datum: 30.09.2025
+#
+# Installation:
+# sudo cp camera_mjpeg.service /etc/systemd/system/
+# sudo systemctl daemon-reload
+# sudo systemctl enable camera_mjpeg.service
+# sudo systemctl start camera_mjpeg.service
+#
+# Befehle:
+# Status prüfen:    sudo systemctl status camera_mjpeg.service
+# Starten:          sudo systemctl start camera_mjpeg.service
+# Stoppen:          sudo systemctl stop camera_mjpeg.service
+# Neu starten:      sudo systemctl restart camera_mjpeg.service
+# Logs anzeigen:    sudo journalctl -u camera_mjpeg.service -f
+# ============================================================================
+
+[Unit]
+# Beschreibung des Services
+Description=Raspberry Pi 5 Kamera-Streaming-System (MJPEG)
+Documentation=https://github.com/raspberrypi/camera-system
+
+# Wartet bis Netzwerk verfügbar ist (wichtig für SFTP und Email)
+After=network-online.target
+Wants=network-online.target
+
+# Startet nach Multiuser-System (alle grundlegenden Dienste laufen)
+After=multi-user.target
+
+[Service]
+# Service-Typ
+Type=simple
+
+# Benutzer unter dem der Service läuft
+User=pi
+Group=pi
+
+# Arbeitsverzeichnis
+WorkingDirectory=/home/pi/camera_system
+
+# Python Virtual Environment aktivieren und Hauptprogramm starten
+ExecStart=/home/pi/camera_system/venv/bin/python3 /home/pi/camera_system/main_mjpeg.py
+
+# Automatischer Neustart bei Absturz
+Restart=always
+RestartSec=10
+
+# Neustart-Strategie
+# on-failure: Nur bei Fehler-Exit-Code neu starten
+# always: Immer neu starten (auch bei normalem Exit)
+# RestartSec: Wartezeit vor Neustart in Sekunden
+
+# Standard-Output und Fehler-Output an Systemd-Journal
+StandardOutput=journal
+StandardError=journal
+
+# Syslog-Identifier für bessere Log-Filterung
+SyslogIdentifier=camera_mjpeg
+
+# Umgebungsvariablen
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONPATH=/home/pi/camera_system"
+
+# Ressourcen-Limits (optional, kann angepasst werden)
+# LimitNOFILE=65536
+# MemoryLimit=1G
+# CPUQuota=80%
+
+# Timeout-Einstellungen
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Sicherheits-Einstellungen (optional)
+# PrivateTmp=yes
+# NoNewPrivileges=yes
+# ProtectSystem=strict
+# ProtectHome=yes
+
+# Kill-Modus: Beendet alle Prozesse der Service-Gruppe
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Cleanup bei Service-Stop
+ExecStopPost=/bin/bash -c 'sleep 2'
+
+[Install]
+# Startet automatisch im Multi-User-Modus (normaler Boot)
+WantedBy=multi-user.target
