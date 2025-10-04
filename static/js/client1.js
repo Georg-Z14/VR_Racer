@@ -2,12 +2,15 @@ let authPassword = null;
 let vrMode = false;
 let overlayTimeout;
 let currentStream = null;
+let pc;
 
-// -------------------------
-// 🔑 Login mit Feedback
-// -------------------------
+// ======================================================
+// 🔑 LOGIN / REGISTRIERUNG
+// ======================================================
+
 async function login() {
-  const pw = document.getElementById("password").value;
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value.trim();
   const card = document.getElementById("login-card");
   const status = document.getElementById("login-status");
 
@@ -18,37 +21,88 @@ async function login() {
     const res = await fetch("/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: pw })
+      body: JSON.stringify({ username, password })
     });
 
     if (res.status === 200) {
-      authPassword = pw;
-      status.textContent = "✅ Login erfolgreich!";
+      authPassword = password;
       card.classList.add("success");
+      status.textContent = "✅ Login erfolgreich!";
       setTimeout(() => {
         card.style.display = "none";
         document.getElementById("stream-card").style.display = "block";
         start();
-      }, 600);
+      }, 800);
     } else {
-      status.textContent = "❌ Falsches Passwort!";
       card.classList.add("error");
+      status.textContent = "❌ Benutzername oder Passwort falsch!";
     }
   } catch {
-    status.textContent = "⚠️ Verbindung fehlgeschlagen!";
     card.classList.add("error");
+    status.textContent = "⚠️ Server nicht erreichbar!";
   }
 }
 
-// -------------------------
+async function register() {
+  const username = document.getElementById("new-username").value.trim();
+  const password = document.getElementById("new-password").value.trim();
+  const card = document.getElementById("register-card");
+  const status = document.getElementById("register-status");
+
+  card.classList.remove("success", "error");
+  status.textContent = "";
+
+  if (!username || !password) {
+    card.classList.add("error");
+    status.textContent = "⚠️ Bitte alle Felder ausfüllen!";
+    return;
+  }
+
+  try {
+    const res = await fetch("/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    });
+
+    if (res.status === 200) {
+      card.classList.add("success");
+      status.textContent = "✅ Benutzer erfolgreich angelegt!";
+      setTimeout(() => {
+        switchToLogin();
+      }, 1200);
+    } else if (res.status === 409) {
+      card.classList.add("error");
+      status.textContent = "❌ Benutzername bereits vergeben!";
+    } else {
+      card.classList.add("error");
+      status.textContent = "⚠️ Fehler bei der Registrierung!";
+    }
+  } catch {
+    card.classList.add("error");
+    status.textContent = "⚠️ Server nicht erreichbar!";
+  }
+}
+
+// Karten-Umschaltung
+function switchToRegister() {
+  document.getElementById("login-card").style.display = "none";
+  document.getElementById("register-card").style.display = "block";
+}
+
+function switchToLogin() {
+  document.getElementById("register-card").style.display = "none";
+  document.getElementById("login-card").style.display = "block";
+}
+
+// ======================================================
+// 📡 STREAMING & WEBRTC
+// ======================================================
+
 const video = document.getElementById("video");
 const statusTxt = document.getElementById("status");
 const hud = document.querySelector(".hud");
-let pc;
 
-// -------------------------
-// 📡 Verbindung starten
-// -------------------------
 async function start() {
   statusTxt.textContent = "🔄 Verbinde...";
   pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
@@ -82,9 +136,10 @@ async function start() {
   monitorPing(pc);
 }
 
-// -------------------------
-// 🎛 Control-Hub mit Auto-Hide
-// -------------------------
+// ======================================================
+// 🎛 OVERLAY BUTTONS
+// ======================================================
+
 function createOverlay() {
   if (document.querySelector(".control-overlay")) return;
   const overlay = document.createElement("div");
@@ -109,9 +164,10 @@ function setupOverlayHide(overlay) {
   show();
 }
 
-// -------------------------
-// 📊 Ping- und FPS-Monitor
-// -------------------------
+// ======================================================
+// 📊 FPS UND PING MONITOR
+// ======================================================
+
 async function monitorPing(pc) {
   setInterval(async () => {
     const stats = await pc.getStats();
@@ -143,24 +199,35 @@ function monitorFPS(video) {
 }
 
 let hudPing = "📡 -- ms", hudFps = "🎥 -- FPS";
+let pingValue = 0, fpsValue = 0;
+
 function updateHud(text, isFps = false) {
   if (isFps) {
     hudFps = text;
-    const val = parseInt(text.match(/\d+/));
-    fpsValue = val;
-    updateHudColor();
+    fpsValue = parseInt(text.match(/\d+/));
   } else {
     hudPing = text;
-    const val = parseFloat(text.match(/\d+(\.\d+)?/));
-    pingValue = val;
-    updateHudColor();
+    pingValue = parseFloat(text.match(/\d+(\.\d+)?/));
   }
   hud.textContent = `${hudPing} | ${hudFps}`;
+  updateHudColor();
 }
 
-// -------------------------
-// 🖥️ Steuerung
-// -------------------------
+function updateHudColor() {
+  hud.classList.remove("ping-low", "ping-mid", "ping-high", "fps-high", "fps-low");
+
+  if (pingValue < 60) hud.classList.add("ping-low");
+  else if (pingValue < 120) hud.classList.add("ping-mid");
+  else hud.classList.add("ping-high");
+
+  if (fpsValue > 40) hud.classList.add("fps-high");
+  else hud.classList.add("fps-low");
+}
+
+// ======================================================
+// 🖥️ STEUERUNG
+// ======================================================
+
 function toggleFullscreen() {
   if (video.requestFullscreen) video.requestFullscreen();
   else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
@@ -168,9 +235,10 @@ function toggleFullscreen() {
 
 function restartStream() { location.reload(); }
 
-// -------------------------
-// 👓 VR-Modus (Side-by-Side)
-// -------------------------
+// ======================================================
+// 👓 VR-MODUS (SIDE-BY-SIDE)
+// ======================================================
+
 function toggleView() {
   vrMode = !vrMode;
 
@@ -189,14 +257,10 @@ function toggleView() {
       vrWrap.id = "vr-sbs-wrap";
       vrWrap.style.display = "flex";
       vrWrap.style.flexDirection = "row";
-      vrWrap.style.justifyContent = "center";
-      vrWrap.style.alignItems = "center";
       vrWrap.style.width = "100%";
-      vrWrap.style.gap = "0";
       vrWrap.style.margin = "0";
       vrWrap.style.padding = "0";
 
-      // Zwei nebeneinanderliegende Videos
       const left = document.createElement("video");
       const right = document.createElement("video");
 
@@ -206,9 +270,7 @@ function toggleView() {
         v.muted = true;
         v.srcObject = currentStream;
         v.style.width = "50%";
-        v.style.height = "auto";
         v.style.objectFit = "cover";
-        v.style.display = "block";
       });
 
       vrWrap.appendChild(left);
@@ -219,7 +281,6 @@ function toggleView() {
 
     video.style.display = "none";
     vrWrap.style.display = "flex";
-
     statusTxt.textContent = "👓 VR-Modus aktiv";
   } else {
     video.style.display = "block";
@@ -229,53 +290,34 @@ function toggleView() {
   }
 }
 
-// -------------------------
-// 👁️ Passwort-Toggle
-// -------------------------
+// ======================================================
+// 👁️ PASSWORT TOGGLE
+// ======================================================
+
 document.addEventListener("DOMContentLoaded", () => {
   const pw = document.getElementById("password");
   const toggle = document.getElementById("toggle-password");
-  toggle.addEventListener("click", () => {
-    if (pw.type === "password") {
-      pw.type = "text";
-      toggle.textContent = "🙈";
-    } else {
-      pw.type = "password";
-      toggle.textContent = "👁️";
-    }
-  });
-  pw.addEventListener("keypress", e => { if (e.key === "Enter") login(); });
+  if (toggle && pw) {
+    toggle.addEventListener("click", () => {
+      pw.type = pw.type === "password" ? "text" : "password";
+      toggle.textContent = pw.type === "password" ? "👁️" : "🙈";
+    });
+  }
+
+  const npw = document.getElementById("new-password");
+  const ntoggle = document.getElementById("toggle-new-password");
+  if (ntoggle && npw) {
+    ntoggle.addEventListener("click", () => {
+      npw.type = npw.type === "password" ? "text" : "password";
+      ntoggle.textContent = npw.type === "password" ? "👁️" : "🙈";
+    });
+  }
 });
 
 // ======================================================
-// 🌈 DYNAMISCHE NEON-EFFEKTE
+// 🔴 BEWEGUNGSERKENNUNG HUD
 // ======================================================
-let pingValue = 0, fpsValue = 0;
 
-function updateHudColor() {
-  hud.classList.remove("ping-low", "ping-mid", "ping-high", "fps-high", "fps-low");
-
-  // Ping Bewertung
-  if (pingValue < 60) hud.classList.add("ping-low");
-  else if (pingValue < 120) hud.classList.add("ping-mid");
-  else hud.classList.add("ping-high");
-
-  // FPS Bewertung
-  if (fpsValue > 40) hud.classList.add("fps-high");
-  else hud.classList.add("fps-low");
-}
-
-// Farbfluss-Effekt (Hue-Rotation)
-let hue = 0;
-setInterval(() => {
-  hue = (hue + 1) % 360;
-  document.documentElement.style.setProperty("--primary", `hsl(${hue}, 100%, 60%)`);
-  document.documentElement.style.setProperty("--secondary", `hsl(${(hue + 120) % 360}, 100%, 60%)`);
-}, 200);
-
-// ======================================================
-// 🔴 Bewegungserkennung HUD-Feedback
-// ======================================================
 let motionActive = false;
 
 async function checkMotion() {
@@ -315,5 +357,14 @@ function showMotionAlert(active) {
   }
 }
 
-// Bewegung alle 0.5 Sekunden prüfen
 setInterval(checkMotion, 500);
+
+// ======================================================
+// 🌈 DYNAMISCHE NEON-FARBEN
+// ======================================================
+let hue = 0;
+setInterval(() => {
+  hue = (hue + 1) % 360;
+  document.documentElement.style.setProperty("--primary", `hsl(${hue}, 100%, 60%)`);
+  document.documentElement.style.setProperty("--secondary", `hsl(${(hue + 120) % 360}, 100%, 60%)`);
+}, 200);

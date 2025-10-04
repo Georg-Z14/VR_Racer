@@ -12,18 +12,47 @@
   <h1>🚗 VR-Racer Live</h1>
 </header>
 
-<!-- Login -->
+<!-- 🔐 LOGIN -->
 <div id="login-card" class="card">
   <h2>🔑 Login</h2>
+
+  <div class="password-wrapper">
+    <input type="text" id="username" placeholder="Benutzername" required>
+  </div>
+
   <div class="password-wrapper">
     <input type="password" id="password" placeholder="Passwort eingeben" required>
     <button type="button" id="toggle-password">👁️</button>
   </div>
-  <button onclick="login()">Login</button>
+
+  <button onclick="login()">Anmelden</button>
   <p id="login-status"></p>
+  <p class="switch-text">Noch kein Konto?
+    <a href="#" class="switch-link" onclick="switchToRegister()">Registrieren</a>
+  </p>
 </div>
 
-<!-- Stream -->
+<!-- 🧾 KONTO ANLEGEN -->
+<div id="register-card" class="card" style="display:none;">
+  <h2>🆕 Konto anlegen</h2>
+
+  <div class="password-wrapper">
+    <input type="text" id="new-username" placeholder="Benutzername" required>
+  </div>
+
+  <div class="register-password-wrapper">
+    <input type="password" id="new-password" placeholder="Passwort erstellen" required>
+    <button type="button" id="toggle-new-password">👁️</button>
+  </div>
+
+  <button onclick="register()">Registrieren</button>
+  <p id="register-status"></p>
+  <p class="switch-text">Schon ein Konto?
+    <a href="#" class="switch-link" onclick="switchToLogin()">Zurück zum Login</a>
+  </p>
+</div>
+
+<!-- 📺 STREAM -->
 <div id="stream-card" class="card" style="display:none;">
   <div class="live-badge">🔴 LIVE</div>
   <video id="video" autoplay playsinline ondblclick="toggleFullscreen()"></video>

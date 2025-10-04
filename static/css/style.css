@@ -60,10 +60,10 @@ h1 {
   text-shadow: 0 0 25px rgba(0,224,255,0.8);
 }
 
-/* ---------------------------
-   Login (responsive + kompakt)
---------------------------- */
-#login-card {
+/* --------------------------------
+   LOGIN & REGISTER STIL
+-------------------------------- */
+#login-card, #register-card {
   background: linear-gradient(135deg, rgba(0,224,255,0.15), rgba(255,0,122,0.15));
   border-radius: 25px;
   padding: clamp(40px, 6vw, 80px);
@@ -77,16 +77,12 @@ h1 {
   justify-content: center;
   animation: fadeInUp 1s ease forwards;
 }
-@keyframes fadeInUp {
-  0% { opacity: 0; transform: translateY(60px) scale(0.95); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
-}
 
-#login-card.success {
+#login-card.success, #register-card.success {
   animation: successFlash 0.5s ease;
   box-shadow: 0 0 45px rgba(0,255,128,0.6);
 }
-#login-card.error {
+#login-card.error, #register-card.error {
   animation: errorShake 0.5s ease;
   box-shadow: 0 0 45px rgba(255,0,0,0.6);
 }
@@ -102,9 +98,13 @@ h1 {
   50%{transform:translateX(10px);}
   75%{transform:translateX(-6px);}
 }
+@keyframes fadeInUp {
+  0% { opacity: 0; transform: translateY(60px) scale(0.95); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
 
-/* Passwortfeld + kompakter Toggle */
-.password-wrapper {
+/* Eingabefelder */
+.password-wrapper, .register-password-wrapper {
   display: flex;
   gap: 8px;
   justify-content: center;
@@ -113,7 +113,8 @@ h1 {
   margin: 0 auto 25px auto;
   width: 100%;
 }
-#password {
+
+#username, #password, #new-username, #new-password {
   flex: 1;
   height: clamp(45px, 5vh, 55px);
   border-radius: 10px;
@@ -124,7 +125,8 @@ h1 {
   padding: 0 14px;
   outline: none;
 }
-#toggle-password {
+
+#toggle-password, #toggle-new-password {
   height: clamp(45px, 5vh, 55px);
   width: clamp(45px, 5vh, 55px);
   display: flex;
@@ -140,8 +142,8 @@ h1 {
   top: -5px;
 }
 
-/* Kompakter Login-Button */
-#login-card button {
+/* Buttons */
+#login-card button, #register-card button {
   background: var(--gradient);
   border: none;
   border-radius: 8px;
@@ -156,17 +158,33 @@ h1 {
   width: fit-content;
   align-self: center;
 }
-
-#login-card button:hover {
+#login-card button:hover, #register-card button:hover {
   transform: scale(1.05);
   box-shadow: 0 0 25px var(--secondary);
 }
 
-#login-status {
+/* Statusnachrichten */
+#login-status, #register-status {
   margin-top: 12px;
   font-weight: bold;
   color: var(--secondary);
   font-size: clamp(0.9em, 1.6vw, 1.1em);
+}
+
+/* Wechsel-Links */
+.switch-text {
+  margin-top: 15px;
+  font-size: 0.95em;
+}
+a.switch-link {
+  color: #00e0ff;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.3s, text-shadow 0.3s;
+}
+a.switch-link:hover {
+  color: #ff007a;
+  text-shadow: 0 0 8px #ff007a;
 }
 
 /* -----------------
@@ -176,6 +194,7 @@ h1 {
   position: relative;
   width: 100%;
   max-width: 900px;
+  display: none;
 }
 video {
   width: 100%;
