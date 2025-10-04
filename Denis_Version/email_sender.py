@@ -157,7 +157,7 @@ class EmailSender:
         # GPS-Daten falls vorhanden
         gps_data = recording_stats.get('gps_data')
         gps_info = ""
-        if gps_
+        if gps_data:
             gps_info = f"""
             <tr>
                 <td style="padding: 8px; border: 1px solid #ddd;"><strong>GPS-Position (Start):</strong></td>

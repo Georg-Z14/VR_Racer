@@ -1,185 +1,166 @@
 let authPassword = null;
-let vrMode = false; // VR Modus an/aus
+let vrMode = false;
+let overlayTimeout;
 
 // -------------------------
-// 🔑 Login
+// 🔑 Login mit Feedback
 // -------------------------
 async function login() {
-    const pw = document.getElementById("password").value;
+  const pw = document.getElementById("password").value;
+  const card = document.getElementById("login-card");
+  const status = document.getElementById("login-status");
 
+  card.classList.remove("success", "error");
+  status.textContent = "";
+
+  try {
     const res = await fetch("/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: pw })
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw })
     });
 
     if (res.status === 200) {
-        authPassword = pw;
-
-        document.getElementById("login-card").style.display = "none";
+      authPassword = pw;
+      status.textContent = "✅ Login erfolgreich!";
+      card.classList.add("success");
+      setTimeout(() => {
+        card.style.display = "none";
         document.getElementById("stream-card").style.display = "block";
-
         start();
+      }, 600);
     } else {
-        document.getElementById("login-status").innerText = "❌ Falsches Passwort!";
+      status.textContent = "❌ Falsches Passwort!";
+      card.classList.add("error");
     }
+  } catch {
+    status.textContent = "⚠️ Verbindung fehlgeschlagen!";
+    card.classList.add("error");
+  }
 }
 
-// -------------------------
-// 🔹 WebRTC Setup
 // -------------------------
 const video = document.getElementById("video");
 const status = document.getElementById("status");
 const hud = document.querySelector(".hud");
-
 let pc;
 
+// -------------------------
 async function start() {
-    try {
-        status.innerText = "🔄 Verbinde...";
-        pc = new RTCPeerConnection({
-            iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-        });
+  status.textContent = "🔄 Verbinde...";
+  pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  pc.addTransceiver("video", { direction: "recvonly" });
 
-        pc.addTransceiver("video", { direction: "recvonly" });
+  pc.ontrack = (event) => {
+    video.srcObject = event.streams[0];
+    video.classList.add("neon-active");
+    monitorFPS(video);
+    createOverlay();
+  };
 
-        pc.ontrack = (event) => {
-            video.srcObject = event.streams[0];
-            monitorFPS(video);
-        };
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
 
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
+  const res = await fetch("/offer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": authPassword },
+    body: JSON.stringify(pc.localDescription)
+  });
 
-        const response = await fetch("/offer", {
-            method: "POST",
-            body: JSON.stringify(pc.localDescription),
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": authPassword
-            }
-        });
+  if (!res.ok) {
+    status.textContent = "❌ Zugriff verweigert!";
+    return;
+  }
 
-        if (!response.ok) {
-            status.innerText = "❌ Zugriff verweigert!";
-            return;
-        }
-
-        const answer = await response.json();
-        await pc.setRemoteDescription(answer);
-
-        status.innerText = "✅ Verbunden!";
-        monitorPing(pc);
-
-    } catch (err) {
-        status.innerText = "❌ Fehler beim Offer!";
-        console.error(err);
-    }
+  const answer = await res.json();
+  await pc.setRemoteDescription(answer);
+  status.textContent = "✅ Verbunden!";
+  monitorPing(pc);
 }
 
 // -------------------------
-// 📡 Ping Monitoring
+// 🎛 Control-Hub mit Auto-Hide
+// -------------------------
+function createOverlay() {
+  if (document.querySelector(".control-overlay")) return;
+  const overlay = document.createElement("div");
+  overlay.className = "control-overlay";
+  overlay.innerHTML = `
+    <button class="overlay-btn" title="Neu verbinden" onclick="restartStream()">🔄</button>
+    <button class="overlay-btn" title="Vollbild" onclick="toggleFullscreen()">🖥️</button>
+    <button class="overlay-btn" title="Ansicht wechseln" onclick="toggleView()">👓</button>
+  `;
+  document.querySelector(".status-bar").appendChild(overlay);
+  setupOverlayHide(overlay);
+}
+
+function setupOverlayHide(overlay) {
+  const show = () => {
+    overlay.classList.remove("hidden");
+    clearTimeout(overlayTimeout);
+    overlayTimeout = setTimeout(() => overlay.classList.add("hidden"), 5000);
+  };
+  document.addEventListener("mousemove", show);
+  document.addEventListener("touchstart", show);
+  show();
+}
+
 // -------------------------
 async function monitorPing(pc) {
-    setInterval(async () => {
-        const stats = await pc.getStats();
-        let rtt = null;
-
-        stats.forEach(report => {
-            if (report.type === "candidate-pair" && report.state === "succeeded") {
-                if (report.currentRoundTripTime) {
-                    rtt = (report.currentRoundTripTime * 1000).toFixed(1);
-                }
-            }
-        });
-
-        if (rtt !== null) updateHud(`📡 Ping: ${rtt} ms`);
-    }, 1000);
+  setInterval(async () => {
+    const stats = await pc.getStats();
+    let rtt = null;
+    stats.forEach(report => {
+      if (report.type === "candidate-pair" && report.state === "succeeded" && report.currentRoundTripTime)
+        rtt = (report.currentRoundTripTime * 1000).toFixed(1);
+    });
+    if (rtt) updateHud(`📡 ${rtt} ms`);
+  }, 1000);
 }
 
-// -------------------------
-// 🎥 FPS Monitoring
-// -------------------------
 function monitorFPS(video) {
-    let lastTime = performance.now();
-    let frames = 0;
-
-    if ("requestVideoFrameCallback" in HTMLVideoElement.prototype) {
-        const callback = (now) => {
-            frames++;
-            const diff = (now - lastTime) / 1000;
-            if (diff >= 1) {
-                const fps = (frames / diff).toFixed(0);
-                updateHud(`🎥 ${fps} FPS`, true);
-                frames = 0;
-                lastTime = now;
-            }
-            video.requestVideoFrameCallback(callback);
-        };
-        video.requestVideoFrameCallback(callback);
-    }
+  let last = performance.now(), frames = 0;
+  if ("requestVideoFrameCallback" in HTMLVideoElement.prototype) {
+    const cb = (now) => {
+      frames++;
+      const diff = (now - last) / 1000;
+      if (diff >= 1) {
+        const fps = (frames / diff).toFixed(0);
+        updateHud(`🎥 ${fps} FPS`, true);
+        frames = 0;
+        last = now;
+      }
+      video.requestVideoFrameCallback(cb);
+    };
+    video.requestVideoFrameCallback(cb);
+  }
 }
 
-// -------------------------
-// 🎛 HUD aktualisieren
-// -------------------------
-let hudPing = "📡 Ping: -- ms";
-let hudFps = "🎥 -- FPS";
-
+let hudPing = "📡 -- ms", hudFps = "🎥 -- FPS";
 function updateHud(text, isFps = false) {
-    if (isFps) hudFps = text;
-    else hudPing = text;
-    hud.innerText = `${hudPing} | ${hudFps}`;
+  if (isFps) hudFps = text; else hudPing = text;
+  hud.textContent = `${hudPing} | ${hudFps}`;
 }
 
-// -------------------------
-// 🛠 Utils
-// -------------------------
 function toggleFullscreen() {
-    if (video.requestFullscreen) video.requestFullscreen();
-    else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
+  if (video.requestFullscreen) video.requestFullscreen();
+  else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
 }
-
 function restartStream() { location.reload(); }
-
-// -------------------------
-// 👓 Ansicht wechseln (VR / Normal)
-// -------------------------
 function toggleView() {
-    vrMode = !vrMode;
-    if (vrMode) {
-        video.style.width = "50%";
-        video.style.display = "inline-block";
-        video.style.transform = "scale(1.2)";
-        status.innerText = "👓 VR-Modus aktiv";
-    } else {
-        video.style.width = "100%";
-        video.style.display = "block";
-        video.style.transform = "none";
-        status.innerText = "🖥 Normal-Modus";
-    }
+  vrMode = !vrMode;
+  video.style.width = vrMode ? "50%" : "100%";
+  video.style.transform = vrMode ? "scale(1.2)" : "none";
+  status.textContent = vrMode ? "👓 VR-Modus aktiv" : "🖥 Normal-Modus";
 }
 
-// -------------------------
-// 👁️ Passwort anzeigen
 // -------------------------
 document.addEventListener("DOMContentLoaded", () => {
-    const pwInput = document.getElementById("password");
-    const toggle = document.getElementById("toggle-password");
-
-    toggle.addEventListener("click", () => {
-        if (pwInput.type === "password") {
-            pwInput.type = "text";
-            toggle.innerText = "🙈";
-        } else {
-            pwInput.type = "password";
-            toggle.innerText = "👁️";
-        }
-    });
-
-    pwInput.addEventListener("keypress", (e) => {
-        if (e.key === "Enter") {
-            login();
-        }
-    });
+  const pw = document.getElementById("password");
+  const toggle = document.getElementById("toggle-password");
+  toggle.addEventListener("click", () => {
+    if (pw.type === "password") { pw.type = "text"; toggle.textContent = "🙈"; }
+    else { pw.type = "password"; toggle.textContent = "👁️"; }
+  });
+  pw.addEventListener("keypress", e => { if (e.key === "Enter") login(); });
 });

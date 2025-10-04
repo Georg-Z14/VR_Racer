@@ -1,54 +1,43 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-    <meta charset="UTF-8">
-    <title>VR-Racer Live</title>
-    <link rel="stylesheet" href="../static/css/style.css">
+  <meta charset="UTF-8">
+  <title>VR-Racer Live</title>
+  <link rel="stylesheet" href="../static/css/style.css">
 </head>
 <body>
-<div class="car-bg">
-    <div class="car tron-car car1"></div>
-    <div class="car tron-car car2"></div>
-    <div class="car tron-car car3"></div>
-    <div class="car tron-car car4"></div>
-    <div class="car tron-car car5"></div>
+
+<header>
+  <img src="../static/logo.png" alt="VR-Racer Logo" class="logo">
+  <h1>🚗 VR-Racer Live</h1>
+</header>
+
+<!-- Login -->
+<div id="login-card" class="card">
+  <h2>🔑 Login</h2>
+  <div class="password-wrapper">
+    <input type="password" id="password" placeholder="Passwort eingeben" required>
+    <button type="button" id="toggle-password">👁️</button>
+  </div>
+  <button onclick="login()">Login</button>
+  <p id="login-status"></p>
 </div>
-    <header>
-        <img src="../static/logo.png" alt="VR-Racer Logo" class="logo">
-        <h1>🚗 VR-Racer Live</h1>
-    </header>
 
-    <!-- Login -->
-    <div id="login-card" class="card">
-        <h2>🔑 Login</h2>
-        <div class="password-wrapper">
-            <input type="password" id="password" placeholder="Passwort eingeben" required>
-            <button type="button" id="toggle-password">👁️</button>
-        </div>
-        <button onclick="login()">Login</button>
-        <p id="login-status"></p>
-    </div>
+<!-- Stream -->
+<div id="stream-card" class="card" style="display:none;">
+  <div class="live-badge">🔴 LIVE</div>
+  <video id="video" autoplay playsinline ondblclick="toggleFullscreen()"></video>
 
-    <!-- Stream -->
-    <div id="stream-card" class="card" style="display:none; position: relative;">
-        <div class="live-badge">🔴 LIVE</div>
-        <video id="video" autoplay playsinline ondblclick="toggleFullscreen()"></video>
-        <p id="status">🔄 Verbinde...</p>
+  <div class="status-bar">
+    <p id="status">🔄 Verbinde...</p>
+    <div class="hud">📡 -- ms | 🎥 -- FPS</div>
+  </div>
+</div>
 
-        <div class="bottom-bar">
-            <div class="controls">
-                <button onclick="restartStream()">🔄 Neu verbinden</button>
-                <button onclick="toggleFullscreen()">🖥 Vollbild</button>
-                <button onclick="toggleView()">👓 Ansicht wechseln</button>
-            </div>
-            <div class="hud">📡 Ping: -- ms | 🎥 -- FPS</div>
-        </div>
-    </div>
+<footer>
+  <p>Made for <strong>VR-Cars</strong> | Powered by VR-Racer 🚀</p>
+</footer>
 
-    <footer>
-        <p>Made for <strong>VR-Cars</strong> | Powered by VR-Racer 🚀</p>
-    </footer>
-
-    <script src="../static/js/client1.js"></script>
-    <script src="../static/js/cars.js"></script>
+<script src="../static/js/client1.js"></script>
+</body>
 </html>
