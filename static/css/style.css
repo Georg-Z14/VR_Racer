@@ -1,12 +1,14 @@
 :root {
   --primary: #00e0ff;
   --secondary: #ff007a;
-  --bg-card: rgba(26,26,26,0.7);
+  --bg-card: rgba(26, 26, 26, 0.7);
   --text-light: #e0e0e0;
   --gradient: linear-gradient(135deg, #00e0ff, #ff007a);
 }
 
-/* Grundlayout */
+/* ======================================================
+   GRUNDLAYOUT
+====================================================== */
 body {
   font-family: "Segoe UI", Roboto, sans-serif;
   background: #000;
@@ -20,7 +22,6 @@ body {
   overflow-x: hidden;
 }
 
-/* Tron-Grid Hintergrund */
 body::before {
   content: "";
   position: fixed;
@@ -28,17 +29,19 @@ body::before {
   width: 200%;
   height: 200%;
   background: repeating-linear-gradient(
-    0deg, rgba(0,224,255,0.1) 0, rgba(0,224,255,0.1) 2px, transparent 2px, transparent 50px
+    0deg, rgba(0, 224, 255, 0.1) 0, rgba(0, 224, 255, 0.1) 2px, transparent 2px, transparent 50px
   ),
   repeating-linear-gradient(
-    90deg, rgba(0,224,255,0.1) 0, rgba(0,224,255,0.1) 2px, transparent 2px, transparent 50px
+    90deg, rgba(0, 224, 255, 0.1) 0, rgba(0, 224, 255, 0.1) 2px, transparent 2px, transparent 50px
   );
   animation: moveGrid 20s linear infinite;
   z-index: -1;
 }
 @keyframes moveGrid { to { transform: translate(-100px, -100px); } }
 
-/* Header */
+/* ======================================================
+   HEADER
+====================================================== */
 header {
   text-align: center;
   margin-bottom: 2vh;
@@ -48,7 +51,7 @@ header {
   height: clamp(80px, 15vw, 140px);
   border-radius: 50%;
   border: 3px solid var(--primary);
-  box-shadow: 0 0 25px rgba(0,224,255,0.8);
+  box-shadow: 0 0 25px rgba(0, 224, 255, 0.8);
   animation: pulse 3s infinite alternate;
 }
 @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.08); } }
@@ -57,17 +60,17 @@ h1 {
   font-size: clamp(2em, 5vw, 3em);
   font-weight: 700;
   color: var(--primary);
-  text-shadow: 0 0 25px rgba(0,224,255,0.8);
+  text-shadow: 0 0 25px rgba(0, 224, 255, 0.8);
 }
 
-/* --------------------------------
-   LOGIN & REGISTER STIL
--------------------------------- */
+/* ======================================================
+   LOGIN / REGISTER
+====================================================== */
 #login-card, #register-card {
-  background: linear-gradient(135deg, rgba(0,224,255,0.15), rgba(255,0,122,0.15));
+  background: linear-gradient(135deg, rgba(0, 224, 255, 0.15), rgba(255, 0, 122, 0.15));
   border-radius: 25px;
   padding: clamp(40px, 6vw, 80px);
-  box-shadow: 0 0 45px rgba(0,224,255,0.3);
+  box-shadow: 0 0 45px rgba(0, 224, 255, 0.3);
   text-align: center;
   width: min(95%, 650px);
   transition: all 0.3s ease;
@@ -80,11 +83,11 @@ h1 {
 
 #login-card.success, #register-card.success {
   animation: successFlash 0.5s ease;
-  box-shadow: 0 0 45px rgba(0,255,128,0.6);
+  box-shadow: 0 0 45px rgba(0, 255, 128, 0.6);
 }
 #login-card.error, #register-card.error {
   animation: errorShake 0.5s ease;
-  box-shadow: 0 0 45px rgba(255,0,0,0.6);
+  box-shadow: 0 0 45px rgba(255, 0, 0, 0.6);
 }
 
 @keyframes successFlash {
@@ -153,7 +156,7 @@ h1 {
   color: #fff;
   cursor: pointer;
   margin-top: 10px;
-  box-shadow: 0 0 15px rgba(0,224,255,0.25);
+  box-shadow: 0 0 15px rgba(0, 224, 255, 0.25);
   transition: transform 0.25s ease, box-shadow 0.25s ease;
   width: fit-content;
   align-self: center;
@@ -163,7 +166,6 @@ h1 {
   box-shadow: 0 0 25px var(--secondary);
 }
 
-/* Statusnachrichten */
 #login-status, #register-status {
   margin-top: 12px;
   font-weight: bold;
@@ -171,25 +173,9 @@ h1 {
   font-size: clamp(0.9em, 1.6vw, 1.1em);
 }
 
-/* Wechsel-Links */
-.switch-text {
-  margin-top: 15px;
-  font-size: 0.95em;
-}
-a.switch-link {
-  color: #00e0ff;
-  font-weight: 600;
-  text-decoration: none;
-  transition: color 0.3s, text-shadow 0.3s;
-}
-a.switch-link:hover {
-  color: #ff007a;
-  text-shadow: 0 0 8px #ff007a;
-}
-
-/* -----------------
-   Stream / HUD / Overlay
------------------ */
+/* ======================================================
+   STREAM / HUD / OVERLAY
+====================================================== */
 #stream-card {
   position: relative;
   width: 100%;
@@ -201,14 +187,14 @@ video {
   border-radius: 14px;
   border: 3px solid var(--primary);
   background: #000;
-  box-shadow: 0 0 25px rgba(0,224,255,0.7);
+  box-shadow: 0 0 25px rgba(0, 224, 255, 0.7);
 }
 video.neon-active {
   animation: neonPulse 2s ease-in-out infinite alternate;
 }
 @keyframes neonPulse {
-  0% { box-shadow: 0 0 25px rgba(0,224,255,.5), inset 0 0 6px rgba(0,224,255,.3); }
-  100% { box-shadow: 0 0 60px rgba(0,224,255,1), inset 0 0 12px rgba(0,224,255,.6); }
+  0% { box-shadow: 0 0 25px rgba(0, 224, 255, .5); }
+  100% { box-shadow: 0 0 60px rgba(0, 224, 255, 1); }
 }
 
 /* Statusbar */
@@ -227,7 +213,6 @@ video.neon-active {
   font-size: 1.1em;
 }
 
-/* HUD rechts */
 .hud {
   font-size: 1em;
   color: var(--primary);
@@ -239,15 +224,17 @@ video.neon-active {
   transform: translateY(-50%);
 }
 
-/* Control-Hub mittig */
+/* Overlay zentriert unten */
 .control-overlay {
   position: absolute;
+  bottom: 40px;
   left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   display: flex;
   flex-direction: row;
   gap: 14px;
+  justify-content: center;
+  align-items: center;
   transition: opacity 0.3s ease;
 }
 .control-overlay.hidden {
@@ -255,8 +242,8 @@ video.neon-active {
   pointer-events: none;
 }
 .overlay-btn {
-  width: 42px;
-  height: 42px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   border: 2px solid var(--primary);
   background: rgba(20,20,20,0.7);
@@ -264,27 +251,56 @@ video.neon-active {
   font-size: 1.1em;
   cursor: pointer;
   box-shadow: 0 0 10px rgba(0,224,255,0.3);
+  transition: all 0.2s ease;
 }
 .overlay-btn:hover {
+  transform: scale(1.1);
   box-shadow: 0 0 20px var(--secondary);
 }
 
-/* Footer */
-footer {
-  margin-top: 25px;
-  font-size: 0.9em;
-  color: #888;
-  text-align: center;
+/* ======================================================
+   UI FEEDBACK
+====================================================== */
+.ui-feedback {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 20, 20, 0.9);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-weight: bold;
+  text-shadow: 0 0 10px #000;
+  opacity: 0;
+  transition: all 0.3s ease;
+  z-index: 1000;
+}
+.ui-feedback.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-10px);
+}
+.ui-feedback.success {
+  background: rgba(0, 255, 128, 0.15);
+  border: 2px solid #00ff80;
+  box-shadow: 0 0 25px #00ff80;
+  color: #00ff80;
+}
+.ui-feedback.error {
+  background: rgba(255, 0, 60, 0.15);
+  border: 2px solid #ff0040;
+  box-shadow: 0 0 25px #ff0040;
+  color: #ff0040;
 }
 
-/* ================================
-   👑 ADMIN PANEL STYLING
-================================ */
+/* ======================================================
+   ADMIN PANEL
+====================================================== */
 #admin-card {
-  background: linear-gradient(135deg, rgba(0,224,255,0.15), rgba(255,0,122,0.15));
+  background: linear-gradient(135deg, rgba(0, 224, 255, 0.15), rgba(255, 0, 122, 0.15));
   border-radius: 25px;
   padding: clamp(40px, 5vw, 70px);
-  box-shadow: 0 0 45px rgba(0,224,255,0.3);
+  box-shadow: 0 0 45px rgba(0, 224, 255, 0.3);
   text-align: center;
   width: min(95%, 750px);
   backdrop-filter: blur(10px);
@@ -331,18 +347,12 @@ footer {
   box-shadow: 0 0 10px #ff0040;
 }
 
-.refresh-btn, .back-btn {
-  margin-top: 15px;
-  border: none;
-  border-radius: 8px;
-  background: var(--gradient);
-  color: white;
-  padding: 8px 20px;
-  font-weight: bold;
-  cursor: pointer;
-  box-shadow: 0 0 15px rgba(0,224,255,0.3);
-}
-.refresh-btn:hover, .back-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 0 25px var(--secondary);
+/* ======================================================
+   FOOTER
+====================================================== */
+footer {
+  margin-top: 25px;
+  font-size: 0.9em;
+  color: #888;
+  text-align: center;
 }

@@ -3,10 +3,11 @@ let vrMode = false;
 let overlayTimeout;
 let currentStream = null;
 let pc;
+let isAdmin = false;
 
-// ======================================================
-// 🔑 LOGIN / REGISTRIERUNG
-// ======================================================
+/* =====================================================
+   🔑 LOGIN / REGISTRIERUNG
+===================================================== */
 
 async function login() {
   const username = document.getElementById("username").value.trim();
@@ -26,29 +27,29 @@ async function login() {
 
     if (res.status === 200) {
       authPassword = password;
+      isAdmin = false;
       card.classList.add("success");
       status.textContent = "✅ Login erfolgreich!";
       setTimeout(() => {
         card.style.display = "none";
         document.getElementById("stream-card").style.display = "block";
         start();
-      }, 700);
-    }
-    else if (res.status === 202) {
-      // 👑 Admin Login (Admin_G oder Admin_D)
+      }, 600);
+    } else if (res.status === 202) {
+      // Admin
+      authPassword = password;
+      isAdmin = true;
       card.classList.add("success");
       status.textContent = "👑 Admin-Login erfolgreich!";
       setTimeout(() => {
         card.style.display = "none";
-        document.getElementById("admin-card").style.display = "block";
-        loadAdminPanel();
-      }, 800);
-    }
-    else if (res.status === 403) {
+        document.getElementById("stream-card").style.display = "block";
+        start();
+      }, 600);
+    } else if (res.status === 403) {
       card.classList.add("error");
       status.textContent = "❌ Benutzername oder Passwort falsch!";
-    }
-    else {
+    } else {
       card.classList.add("error");
       status.textContent = "⚠️ Unbekannter Fehler beim Login!";
     }
@@ -83,15 +84,11 @@ async function registerUser() {
     if (res.status === 200) {
       card.classList.add("success");
       status.textContent = "✅ Benutzer erfolgreich angelegt!";
-      setTimeout(() => {
-        switchToLogin();
-      }, 1000);
-    }
-    else if (res.status === 409) {
+      setTimeout(() => switchToLogin(), 900);
+    } else if (res.status === 409) {
       card.classList.add("error");
       status.textContent = "❌ Benutzername bereits vergeben!";
-    }
-    else {
+    } else {
       card.classList.add("error");
       status.textContent = "⚠️ Fehler bei der Registrierung!";
     }
@@ -101,7 +98,6 @@ async function registerUser() {
   }
 }
 
-// Karten-Umschaltung
 function switchToRegister() {
   document.getElementById("login-card").style.display = "none";
   document.getElementById("register-card").style.display = "block";
@@ -112,41 +108,98 @@ function switchToLogin() {
   document.getElementById("login-card").style.display = "block";
 }
 
-// ======================================================
-// 👑 ADMIN PANEL
-// ======================================================
+/* =====================================================
+   👑 ADMIN OVERLAY (Liste / Löschen / Ändern)
+===================================================== */
+
+function openAdminPanel() {
+  const overlay = document.getElementById("admin-overlay");
+  if (!overlay) return;
+  overlay.style.display = "block";
+  loadAdminPanel();
+}
+
+function closeAdminPanel() {
+  const overlay = document.getElementById("admin-overlay");
+  if (!overlay) return;
+  overlay.style.display = "none";
+}
 
 async function loadAdminPanel() {
   const container = document.getElementById("admin-list");
+  if (!container) return;
   container.innerHTML = "⏳ Lade Benutzer...";
 
   try {
     const res = await fetch("/admin/users");
     if (!res.ok) {
-      container.innerHTML = "❌ Fehler beim Laden der Benutzerliste!";
+      container.innerHTML = "❌ Fehler beim Laden!";
       return;
     }
-
     const users = await res.json();
-    if (users.length === 0) {
+
+    if (!users || users.length === 0) {
       container.innerHTML = "<p>Keine Benutzer registriert.</p>";
       return;
     }
 
     container.innerHTML = "";
     users.forEach(u => {
-      const div = document.createElement("div");
-      div.className = "user-row";
-      div.innerHTML = `
-        <span class="username">${u.username}</span>
-        <button class="delete-btn" onclick="deleteUser(${u.id})">❌</button>
+      const row = document.createElement("div");
+      row.className = "user-row";
+      row.innerHTML = `
+        <input class="admin-name-input" id="name-${u.id}" value="${escapeHtml(u.username)}" ${u.is_admin ? "disabled" : ""} />
+        <input class="admin-pass-input" id="pass-${u.id}" placeholder="${u.is_admin ? "Admin geschützt" : "Neues Passwort (optional)"}" type="text" ${u.is_admin ? "disabled" : ""} />
+        <div class="admin-actions">
+          <button class="save-btn" ${u.is_admin ? "disabled" : ""} onclick="saveUser(${u.id})">💾</button>
+          <button class="delete-btn" ${u.is_admin ? "disabled" : ""} onclick="deleteUser(${u.id})">🗑️</button>
+          ${u.is_admin ? '<span class="admin-badge">👑</span>' : ""}
+        </div>
       `;
-      container.appendChild(div);
+      container.appendChild(row);
+    });
+  } catch (e) {
+    console.error(e);
+    container.innerHTML = "⚠️ Serverfehler beim Laden!";
+  }
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+async function saveUser(id) {
+  const nameEl = document.getElementById(`name-${id}`);
+  const passEl = document.getElementById(`pass-${id}`);
+  const newName = nameEl.value.trim();
+  const newPass = passEl.value.trim();
+
+  if (!newName && !newPass) {
+    alert("Bitte Name und/oder Passwort ändern.");
+    return;
+  }
+
+  try {
+    const res = await fetch("/admin/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, username: newName, password: newPass })
     });
 
-  } catch (err) {
-    console.error(err);
-    container.innerHTML = "⚠️ Serverfehler beim Laden!";
+    if (res.status === 200) {
+      passEl.value = "";
+      loadAdminPanel();
+    } else if (res.status === 409) {
+      alert("❌ Benutzername bereits vergeben.");
+    } else if (res.status === 403) {
+      alert("⚠️ Admin-Konten sind geschützt.");
+    } else if (res.status === 404) {
+      alert("⚠️ Benutzer nicht gefunden.");
+    } else {
+      alert("❌ Fehler beim Speichern.");
+    }
+  } catch {
+    alert("⚠️ Server nicht erreichbar!");
   }
 }
 
@@ -162,6 +215,8 @@ async function deleteUser(id) {
 
     if (res.ok) {
       loadAdminPanel();
+    } else if (res.status === 404) {
+      alert("⚠️ Benutzer nicht gefunden oder Admin (geschützt).");
     } else {
       alert("❌ Fehler beim Löschen des Benutzers!");
     }
@@ -170,9 +225,9 @@ async function deleteUser(id) {
   }
 }
 
-// ======================================================
-// 📡 STREAMING & WEBRTC
-// ======================================================
+/* =====================================================
+   📡 STREAMING & WEBRTC
+===================================================== */
 
 const video = document.getElementById("video");
 const statusTxt = document.getElementById("status");
@@ -180,7 +235,9 @@ const hud = document.querySelector(".hud");
 
 async function start() {
   statusTxt.textContent = "🔄 Verbinde...";
-  pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  pc = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+  });
   pc.addTransceiver("video", { direction: "recvonly" });
 
   pc.ontrack = (event) => {
@@ -196,7 +253,7 @@ async function start() {
 
   const res = await fetch("/offer", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": authPassword },
+    headers: { "Content-Type": "application/json", "Authorization": authPassword || "" },
     body: JSON.stringify(pc.localDescription)
   });
 
@@ -211,12 +268,13 @@ async function start() {
   monitorPing(pc);
 }
 
-// ======================================================
-// 🎛 OVERLAY BUTTONS
-// ======================================================
+/* =====================================================
+   🎛 OVERLAY BUTTONS (inkl. Admin)
+===================================================== */
 
 function createOverlay() {
   if (document.querySelector(".control-overlay")) return;
+
   const overlay = document.createElement("div");
   overlay.className = "control-overlay";
   overlay.innerHTML = `
@@ -224,6 +282,16 @@ function createOverlay() {
     <button class="overlay-btn" title="Vollbild" onclick="toggleFullscreen()">🖥️</button>
     <button class="overlay-btn" title="Ansicht wechseln" onclick="toggleView()">👓</button>
   `;
+
+  if (isAdmin) {
+    const adminBtn = document.createElement("button");
+    adminBtn.className = "overlay-btn";
+    adminBtn.title = "Benutzerverwaltung";
+    adminBtn.textContent = "🛠️";
+    adminBtn.onclick = openAdminPanel;
+    overlay.appendChild(adminBtn);
+  }
+
   document.querySelector(".status-bar").appendChild(overlay);
   setupOverlayHide(overlay);
 }
@@ -239,9 +307,9 @@ function setupOverlayHide(overlay) {
   show();
 }
 
-// ======================================================
-// 📊 FPS UND PING MONITOR
-// ======================================================
+/* =====================================================
+   📊 FPS & PING
+===================================================== */
 
 async function monitorPing(pc) {
   setInterval(async () => {
@@ -290,7 +358,6 @@ function updateHud(text, isFps = false) {
 
 function updateHudColor() {
   hud.classList.remove("ping-low", "ping-mid", "ping-high", "fps-high", "fps-low");
-
   if (pingValue < 60) hud.classList.add("ping-low");
   else if (pingValue < 120) hud.classList.add("ping-mid");
   else hud.classList.add("ping-high");
@@ -299,9 +366,9 @@ function updateHudColor() {
   else hud.classList.add("fps-low");
 }
 
-// ======================================================
-// 🖥️ STEUERUNG
-// ======================================================
+/* =====================================================
+   🖥️ STEUERUNG
+===================================================== */
 
 function toggleFullscreen() {
   if (video.requestFullscreen) video.requestFullscreen();
@@ -310,13 +377,12 @@ function toggleFullscreen() {
 
 function restartStream() { location.reload(); }
 
-// ======================================================
-// 👓 VR-MODUS (SIDE-BY-SIDE)
-// ======================================================
+/* =====================================================
+   👓 VR
+===================================================== */
 
 function toggleView() {
   vrMode = !vrMode;
-
   const streamCard = document.getElementById("stream-card");
   let vrWrap = document.getElementById("vr-sbs-wrap");
 
@@ -326,19 +392,14 @@ function toggleView() {
       vrMode = false;
       return;
     }
-
     if (!vrWrap) {
       vrWrap = document.createElement("div");
       vrWrap.id = "vr-sbs-wrap";
       vrWrap.style.display = "flex";
       vrWrap.style.flexDirection = "row";
       vrWrap.style.width = "100%";
-      vrWrap.style.margin = "0";
-      vrWrap.style.padding = "0";
-
       const left = document.createElement("video");
       const right = document.createElement("video");
-
       [left, right].forEach(v => {
         v.autoplay = true;
         v.playsInline = true;
@@ -347,13 +408,10 @@ function toggleView() {
         v.style.width = "50%";
         v.style.objectFit = "cover";
       });
-
       vrWrap.appendChild(left);
       vrWrap.appendChild(right);
-
       streamCard.insertBefore(vrWrap, streamCard.querySelector(".status-bar"));
     }
-
     video.style.display = "none";
     vrWrap.style.display = "flex";
     statusTxt.textContent = "👓 VR-Modus aktiv";
@@ -365,22 +423,17 @@ function toggleView() {
   }
 }
 
-// ======================================================
-// 👁️ PASSWORT TOGGLE
-// ======================================================
+/* =====================================================
+   👁️ PASSWORT TOGGLES
+===================================================== */
 
 document.addEventListener("DOMContentLoaded", () => {
   const pw = document.getElementById("password");
   const toggle = document.getElementById("toggle-password");
   if (toggle && pw) {
     toggle.addEventListener("click", () => {
-      if (pw.type === "password") {
-        pw.type = "text";
-        toggle.textContent = "🙈";
-      } else {
-        pw.type = "password";
-        toggle.textContent = "👁️";
-      }
+      if (pw.type === "password") { pw.type = "text"; toggle.textContent = "🙈"; }
+      else { pw.type = "password"; toggle.textContent = "👁️"; }
     });
   }
 
@@ -388,20 +441,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const ntoggle = document.getElementById("toggle-new-password");
   if (ntoggle && npw) {
     ntoggle.addEventListener("click", () => {
-      if (npw.type === "password") {
-        npw.type = "text";
-        ntoggle.textContent = "🙈";
-      } else {
-        npw.type = "password";
-        ntoggle.textContent = "👁️";
-      }
+      if (npw.type === "password") { npw.type = "text"; ntoggle.textContent = "🙈"; }
+      else { npw.type = "password"; ntoggle.textContent = "👁️"; }
     });
   }
 });
 
-// ======================================================
-// 🔴 BEWEGUNGSERKENNUNG HUD
-// ======================================================
+/* =====================================================
+   🔴 BEWEGUNGSERKENNUNG & 🌈 NEON
+===================================================== */
 
 let motionActive = false;
 
@@ -411,42 +459,22 @@ async function checkMotion() {
     const data = await res.json();
     if (data.motion && !motionActive) {
       motionActive = true;
-      showMotionAlert(true);
+      const hudEl = document.querySelector(".hud");
+      hudEl.style.color = "#ff0040";
+      hudEl.style.textShadow = "0 0 30px #ff0040";
+      hudEl.textContent = "🔴 Bewegung erkannt!";
       setTimeout(() => {
-        showMotionAlert(false);
+        hudEl.style.color = "var(--primary)";
+        hudEl.style.textShadow = "0 0 10px var(--primary)";
         motionActive = false;
       }, 2000);
     }
-  } catch (err) {
-    console.warn("⚠️ Motion check failed:", err);
+  } catch (e) {
+    console.warn("⚠️ Motion check failed:", e);
   }
 }
-
-function showMotionAlert(active) {
-  const hud = document.querySelector(".hud");
-  if (active) {
-    hud.style.color = "#ff0040";
-    hud.style.textShadow = "0 0 30px #ff0040";
-    hud.textContent = "🔴 Bewegung erkannt!";
-    hud.animate(
-      [
-        { transform: "scale(1)", opacity: 1 },
-        { transform: "scale(1.3)", opacity: 0.7 },
-        { transform: "scale(1)", opacity: 1 }
-      ],
-      { duration: 600, iterations: 3 }
-    );
-  } else {
-    hud.style.color = "var(--primary)";
-    hud.style.textShadow = "0 0 10px var(--primary)";
-  }
-}
-
 setInterval(checkMotion, 500);
 
-// ======================================================
-// 🌈 DYNAMISCHE NEON-FARBEN
-// ======================================================
 let hue = 0;
 setInterval(() => {
   hue = (hue + 1) % 360;

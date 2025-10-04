@@ -27,3 +27,5 @@ pycparser~=2.23
 
 
 192.168.178.159
+
+rm users.db
