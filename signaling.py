@@ -2,7 +2,7 @@ import json
 import asyncio
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
-from camera_stream import CameraStream
+from camera_stream import MotionCameraStream as CameraStream
 
 pcs = set()
 
