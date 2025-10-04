@@ -4,57 +4,81 @@ from av import VideoFrame
 import numpy as np
 import threading
 
-class CameraStream(VideoStreamTrack):
-    """Optimierter Kamera-Stream mit Threading für flüssigere FPS."""
-
-    def __init__(self, camera_index=0):
+class MotionCameraStream(VideoStreamTrack):
+    """
+    Kamera-Stream mit dynamischem Resize + Bewegungserkennung.
+    Erkennt Bildänderungen über Frame-Differenz.
+    """
+    def __init__(self, camera_index=0, target_size=(1280, 720), sensitivity=40):
         super().__init__()
         self.cap = cv2.VideoCapture(camera_index)
+        self.lock = threading.Lock()
+        self.prev_gray = None
+        self.motion_detected = False
+        self.sensitivity = sensitivity
 
         if not self.cap.isOpened():
             print(f"❌ Kamera mit Index {camera_index} konnte nicht geöffnet werden!")
-            self.frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+            self.frame = np.zeros((target_size[1], target_size[0], 3), dtype=np.uint8)
         else:
-            # Kamera-Parameter
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
             self.cap.set(cv2.CAP_PROP_FPS, 30)
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+            self.cap.set(cv2.CAP_PROP_EXPOSURE, 0)
+            self.cap.set(cv2.CAP_PROP_AUTO_WB, 0)
 
-            # Optional: Automatik deaktivieren (nicht jede Cam unterstützt das)
-            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # 0.25 = Manuell
-            self.cap.set(cv2.CAP_PROP_EXPOSURE, 0)        # Anpassen für Helligkeit
-            self.cap.set(cv2.CAP_PROP_AUTO_WB, 0)          # Auto White Balance aus
-
-        self.frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        self.frame = np.zeros((target_size[1], target_size[0], 3), dtype=np.uint8)
         self.running = True
+        self._target_w, self._target_h = target_size
 
-        # Extra Thread starten
         self.thread = threading.Thread(target=self._reader, daemon=True)
         self.thread.start()
 
+    def set_target_size(self, width: int, height: int):
+        with self.lock:
+            self._target_w, self._target_h = width, height
+
+    def get_target_size(self):
+        with self.lock:
+            return self._target_w, self._target_h
+
+    def _detect_motion(self, frame):
+        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        gray = cv2.GaussianBlur(gray, (21, 21), 0)
+
+        if self.prev_gray is None:
+            self.prev_gray = gray
+            return False
+
+        diff = cv2.absdiff(self.prev_gray, gray)
+        thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)[1]
+        motion_level = np.sum(thresh) / 255
+
+        self.prev_gray = gray
+        self.motion_detected = motion_level > self.sensitivity * 1000
+
     def _reader(self):
-        """Separater Thread, liest immer das neueste Frame."""
         while self.running and self.cap.isOpened():
             ret, frame = self.cap.read()
             if ret:
-                # Immer nur das letzte Frame speichern
-                self.frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                tw, th = self.get_target_size()
+                if tw and th and (frame.shape[1] != tw or frame.shape[0] != th):
+                    frame = cv2.resize(frame, (tw, th), interpolation=cv2.INTER_AREA)
+                self.frame = frame
+                self._detect_motion(frame)
 
     async def recv(self):
         pts, time_base = await self.next_timestamp()
-
-        frame = VideoFrame.from_ndarray(self.frame, format="rgb24")
-        frame.pts = pts
-        frame.time_base = time_base
-        return frame
+        frm = VideoFrame.from_ndarray(self.frame, format="rgb24")
+        frm.pts = pts
+        frm.time_base = time_base
+        return frm
 
     def stop(self):
         self.running = False
         if self.cap and self.cap.isOpened():
             self.cap.release()
             print("📷 Kamera gestoppt")
-
-    def __del__(self):
-        self.stop()
-        print("📷 Kamera freigegeben (Destructor)")
