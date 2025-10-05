@@ -4,9 +4,13 @@ let overlayTimeout;
 let currentStream = null;
 let pc;
 let isAdmin = false;
+let token = null;
+let tokenExpiry = null;
+let tokenTimer = null;
+let hudTimer = "⏰ --:--";
 
 /* =====================================================
-   🔑 LOGIN / REGISTRIERUNG
+   🔑 LOGIN / REGISTRIERUNG (JWT)
 ===================================================== */
 
 async function login() {
@@ -25,25 +29,24 @@ async function login() {
       body: JSON.stringify({ username, password })
     });
 
-    if (res.status === 200) {
-      authPassword = password;
-      isAdmin = false;
-      card.classList.add("success");
-      status.textContent = "✅ Login erfolgreich!";
-      showFeedback("✅ Login erfolgreich!", "success");
+    const data = await res.text();
 
-      setTimeout(() => {
-        card.style.display = "none";
-        document.getElementById("stream-card").style.display = "block";
-        start();
-      }, 600);
-    } else if (res.status === 202) {
-      // Admin
-      authPassword = password;
-      isAdmin = true;
+    if (res.status === 200 || res.status === 202) {
+      const json = JSON.parse(data);
+      token = json.token;
+      tokenExpiry = Date.now() + json.expires_in * 1000; // vom Server
+      isAdmin = (res.status === 202);
+
+      // Persistieren bis Ablauf
+      localStorage.setItem("jwt_token", token);
+      localStorage.setItem("jwt_expiry", String(tokenExpiry));
+      localStorage.setItem("is_admin", String(isAdmin));
+
       card.classList.add("success");
-      status.textContent = "👑 Admin-Login erfolgreich!";
-      showFeedback("👑 Admin-Login erfolgreich!", "success");
+      status.textContent = isAdmin ? "👑 Admin-Login erfolgreich!" : "✅ Login erfolgreich!";
+      showFeedback(status.textContent, "success");
+
+      scheduleTokenExpiryLogout();
 
       setTimeout(() => {
         card.style.display = "none";
@@ -120,6 +123,66 @@ function switchToLogin() {
 }
 
 /* =====================================================
+   👁️ PASSWORT-TOGGLE + ENTER LOGIN
+===================================================== */
+
+function setupPasswordToggles() {
+  const pw = document.getElementById("password");
+  const toggle = document.getElementById("toggle-password");
+  if (toggle && pw) {
+    toggle.addEventListener("click", () => {
+      if (pw.type === "password") {
+        pw.type = "text";
+        toggle.textContent = "🙈";
+      } else {
+        pw.type = "password";
+        toggle.textContent = "👁️";
+      }
+    });
+  }
+
+  const npw = document.getElementById("new-password");
+  const ntoggle = document.getElementById("toggle-new-password");
+  if (ntoggle && npw) {
+    ntoggle.addEventListener("click", () => {
+      if (npw.type === "password") {
+        npw.type = "text";
+        ntoggle.textContent = "🙈";
+      } else {
+        npw.type = "password";
+        ntoggle.textContent = "👁️";
+      }
+    });
+  }
+}
+
+function setupEnterShortcuts() {
+  const loginInputs = [document.getElementById("username"), document.getElementById("password")];
+  loginInputs.forEach(input => {
+    if (input) {
+      input.addEventListener("keypress", e => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          login();
+        }
+      });
+    }
+  });
+
+  const registerInputs = [document.getElementById("new-username"), document.getElementById("new-password")];
+  registerInputs.forEach(input => {
+    if (input) {
+      input.addEventListener("keypress", e => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          registerUser();
+        }
+      });
+    }
+  });
+}
+
+/* =====================================================
    👑 ADMIN OVERLAY
 ===================================================== */
 
@@ -137,10 +200,27 @@ async function loadAdminPanel() {
   const container = document.getElementById("admin-list");
   container.innerHTML = "<p>⏳ Lade Benutzer...</p>";
 
+  if (!token) {
+    container.innerHTML = "❌ Kein Token – bitte neu anmelden.";
+    return;
+  }
+
   try {
-    const res = await fetch("/admin/users");
+    const res = await fetch("/admin/users", {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+
+    if (res.status === 401) {
+      container.innerHTML = "⚠️ Sitzung abgelaufen oder keine Admin-Rechte.";
+      showFeedback("⚠️ Sitzung abgelaufen – bitte neu anmelden!", "error");
+      setTimeout(() => location.reload(), 2000);
+      return;
+    }
+
     if (!res.ok) {
-      container.innerHTML = "❌ Fehler beim Laden!";
+      const msg = await res.text().catch(() => "");
+      container.innerHTML = `❌ Fehler (${res.status}): ${msg}`;
+      console.warn("Admin-Users fetch failed:", res.status, msg);
       return;
     }
 
@@ -166,7 +246,8 @@ async function loadAdminPanel() {
       container.appendChild(row);
     });
   } catch (e) {
-    container.innerHTML = "⚠️ Serverfehler!";
+    console.error("⚠️ Serverfehler /admin/users:", e);
+    container.innerHTML = "⚠️ Serverfehler (Konsole prüfen).";
   }
 }
 
@@ -182,7 +263,10 @@ async function saveUser(id) {
   try {
     const res = await fetch("/admin/update", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
       body: JSON.stringify({ id, username: newName, password: newPass })
     });
 
@@ -207,7 +291,10 @@ async function deleteUser(id) {
   try {
     const res = await fetch("/admin/delete", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
       body: JSON.stringify({ id })
     });
     if (res.ok) {
@@ -228,7 +315,72 @@ function escapeHtml(str) {
 }
 
 /* =====================================================
-   📡 STREAM & WEBRTC
+   TOKEN-EXPIRY HANDLING + COUNTDOWN
+===================================================== */
+
+function scheduleTokenExpiryLogout() {
+  if (tokenTimer) clearTimeout(tokenTimer);
+  const timeLeft = tokenExpiry - Date.now();
+  if (timeLeft <= 0) {
+    logoutDueToExpiry();
+    return;
+  }
+  startTokenCountdown();
+  tokenTimer = setTimeout(logoutDueToExpiry, timeLeft);
+}
+
+function startTokenCountdown() {
+  const interval = setInterval(() => {
+    if (!tokenExpiry) return clearInterval(interval);
+    const remaining = tokenExpiry - Date.now();
+    if (remaining <= 0) {
+      clearInterval(interval);
+      logoutDueToExpiry();
+      return;
+    }
+    const min = Math.floor(remaining / 60000);
+    const sec = Math.floor((remaining % 60000) / 1000).toString().padStart(2, "0");
+    hudTimer = `⏰ ${min}:${sec}`;
+    updateHudDisplay();
+  }, 1000);
+}
+
+function logoutDueToExpiry() {
+  showFeedback("⚠️ Sitzung abgelaufen – bitte neu anmelden!", "error");
+  localStorage.removeItem("jwt_token");
+  localStorage.removeItem("jwt_expiry");
+  localStorage.removeItem("is_admin");
+  token = null;
+  tokenExpiry = null;
+  isAdmin = false;
+  setTimeout(() => location.reload(), 2000);
+}
+
+/* =====================================================
+   AUTO-LOGIN BEI RELOAD
+===================================================== */
+
+document.addEventListener("DOMContentLoaded", () => {
+  setupPasswordToggles();
+  setupEnterShortcuts();
+
+  const savedToken = localStorage.getItem("jwt_token");
+  const savedExpiry = localStorage.getItem("jwt_expiry");
+  const adminFlag = localStorage.getItem("is_admin");
+
+  if (savedToken && savedExpiry && Date.now() < parseInt(savedExpiry)) {
+    token = savedToken;
+    tokenExpiry = parseInt(savedExpiry);
+    isAdmin = (adminFlag === "true");
+    scheduleTokenExpiryLogout();
+    document.getElementById("login-card").style.display = "none";
+    document.getElementById("stream-card").style.display = "block";
+    start();
+  }
+});
+
+/* =====================================================
+   STREAM / HUD / VR / NEON
 ===================================================== */
 
 const video = document.getElementById("video");
@@ -252,7 +404,10 @@ async function start() {
   await pc.setLocalDescription(offer);
   const res = await fetch("/offer", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": authPassword || "" },
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`
+    },
     body: JSON.stringify(pc.localDescription)
   });
 
@@ -266,10 +421,6 @@ async function start() {
   statusTxt.textContent = "✅ Verbunden!";
   monitorPing(pc);
 }
-
-/* =====================================================
-   🎛 OVERLAY BUTTONS
-===================================================== */
 
 function createOverlay() {
   if (document.querySelector(".control-overlay")) return;
@@ -303,10 +454,6 @@ function setupOverlayHide(overlay) {
   show();
 }
 
-/* =====================================================
-   FPS / PING
-===================================================== */
-
 async function monitorPing(pc) {
   setInterval(async () => {
     const stats = await pc.getStats();
@@ -338,20 +485,24 @@ function monitorFPS(video) {
 }
 
 let hudPing = "📡 -- ms", hudFps = "🎥 -- FPS";
+
 function updateHud(text, isFps = false) {
   if (isFps) hudFps = text;
   else hudPing = text;
-  hud.textContent = `${hudPing} | ${hudFps}`;
+  updateHudDisplay();
 }
 
-/* =====================================================
-   VIEW / VR
-===================================================== */
+function updateHudDisplay() {
+  const hudEl = document.querySelector(".hud");
+  if (!hudEl) return;
+  hudEl.textContent = `${hudPing} | ${hudFps} | ${hudTimer}`;
+}
 
 function toggleFullscreen() {
   if (video.requestFullscreen) video.requestFullscreen();
   else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
 }
+
 function restartStream() { location.reload(); }
 
 function toggleView() {
@@ -397,57 +548,7 @@ function toggleView() {
 }
 
 /* =====================================================
-   👁️ PASSWORT-TOGGLE + ENTER LOGIN
-===================================================== */
-
-document.addEventListener("DOMContentLoaded", () => {
-  const pw = document.getElementById("password");
-  const toggle = document.getElementById("toggle-password");
-  if (toggle && pw) {
-    toggle.addEventListener("click", () => {
-      if (pw.type === "password") { pw.type = "text"; toggle.textContent = "🙈"; }
-      else { pw.type = "password"; toggle.textContent = "👁️"; }
-    });
-  }
-
-  const npw = document.getElementById("new-password");
-  const ntoggle = document.getElementById("toggle-new-password");
-  if (ntoggle && npw) {
-    ntoggle.addEventListener("click", () => {
-      if (npw.type === "password") { npw.type = "text"; ntoggle.textContent = "🙈"; }
-      else { npw.type = "password"; ntoggle.textContent = "👁️"; }
-    });
-  }
-
-  // ⌨️ ENTER-Taste Login
-  const loginInputs = [document.getElementById("username"), document.getElementById("password")];
-  loginInputs.forEach(input => {
-    if (input) {
-      input.addEventListener("keypress", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          login();
-        }
-      });
-    }
-  });
-
-  // ⌨️ ENTER-Taste Registrierung
-  const registerInputs = [document.getElementById("new-username"), document.getElementById("new-password")];
-  registerInputs.forEach(input => {
-    if (input) {
-      input.addEventListener("keypress", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          registerUser();
-        }
-      });
-    }
-  });
-});
-
-/* =====================================================
-   🟩 UI FEEDBACK
+   UI FEEDBACK + NEON
 ===================================================== */
 
 function showFeedback(message, type = "success") {
@@ -457,33 +558,6 @@ function showFeedback(message, type = "success") {
   box.className = `ui-feedback show ${type}`;
   setTimeout(() => { box.className = "ui-feedback"; }, 3000);
 }
-
-/* =====================================================
-   🔴 BEWEGUNGSERKENNUNG & 🌈 NEON
-===================================================== */
-
-let motionActive = false;
-async function checkMotion() {
-  try {
-    const res = await fetch("/motion");
-    const data = await res.json();
-    if (data.motion && !motionActive) {
-      motionActive = true;
-      const hudEl = document.querySelector(".hud");
-      hudEl.style.color = "#ff0040";
-      hudEl.style.textShadow = "0 0 30px #ff0040";
-      hudEl.textContent = "🔴 Bewegung erkannt!";
-      setTimeout(() => {
-        hudEl.style.color = "var(--primary)";
-        hudEl.style.textShadow = "0 0 10px var(--primary)";
-        motionActive = false;
-      }, 2000);
-    }
-  } catch (e) {
-    console.warn("⚠️ Motion check failed:", e);
-  }
-}
-setInterval(checkMotion, 500);
 
 let hue = 0;
 setInterval(() => {

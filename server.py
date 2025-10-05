@@ -3,6 +3,9 @@ import json
 import sqlite3
 import hashlib
 import os
+import jwt
+import datetime
+import traceback
 from typing import List, Dict, Optional
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
@@ -23,16 +26,28 @@ camera = MotionCameraStream(camera_index=0, target_size=(1280, 720))
 DB_PATH = "users.db"
 KEY_FILE = "secret.key"
 
+# ✅ JWT nur aus .env (ohne Defaults im Code)
+JWT_SECRET = os.getenv("JWT_SECRET")
+JWT_EXPIRE_MINUTES_STR = os.getenv("JWT_EXPIRE_MINUTES")
+
+if not JWT_SECRET:
+    raise RuntimeError("❌ Kein JWT_SECRET in .env gefunden! Bitte setzen.")
+if not JWT_EXPIRE_MINUTES_STR:
+    raise RuntimeError("❌ Keine Ablaufzeit (JWT_EXPIRE_MINUTES) in .env gefunden! Bitte setzen.")
+
+try:
+    JWT_EXPIRE_MINUTES = int(JWT_EXPIRE_MINUTES_STR)
+except ValueError:
+    raise RuntimeError("❌ JWT_EXPIRE_MINUTES muss eine Ganzzahl sein (Minuten).")
+
 # ======================================================
 # 🔐 HASH & VERSCHLÜSSELUNG
 # ======================================================
 
 def hash_pw(password: str) -> str:
-    """Sicherer Hash mit SHA256"""
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 def load_key() -> bytes:
-    """Lädt oder erzeugt AES-Verschlüsselungs-Key für Usernamen"""
     try:
         with open(KEY_FILE, "rb") as f:
             return f.read()
@@ -50,14 +65,12 @@ fernet = Fernet(load_key())
 # ======================================================
 
 def ensure_is_admin_column(c: sqlite3.Cursor):
-    """Falls alte DB ohne is_admin existiert -> Spalte nachrüsten."""
     try:
         c.execute("SELECT is_admin FROM users LIMIT 1")
     except sqlite3.OperationalError:
         c.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
 
 def init_db():
-    """Initialisiert die Datenbank und legt Admins aus .env an"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
@@ -72,7 +85,6 @@ def init_db():
     ensure_is_admin_column(c)
     conn.commit()
 
-    # Admins aus .env laden
     admins = {
         "Admin_G": os.getenv("ADMIN_G_PASS"),
         "Admin_D": os.getenv("ADMIN_D_PASS")
@@ -80,10 +92,9 @@ def init_db():
 
     for name, pw in admins.items():
         if not pw:
-            print(f"⚠️ Kein Passwort in .env für {name} gefunden – übersprungen.")
+            print(f"⚠️ Kein Passwort in .env für {name} – übersprungen.")
             continue
 
-        # Existiert schon?
         c.execute("SELECT username FROM users")
         rows = c.fetchall()
         exists = False
@@ -106,6 +117,10 @@ def init_db():
     conn.commit()
     conn.close()
     print(f"✅ Datenbank initialisiert: {DB_PATH}")
+
+# ======================================================
+# 👥 BENUTZERFUNKTIONEN
+# ======================================================
 
 def username_exists(username: str) -> bool:
     conn = sqlite3.connect(DB_PATH)
@@ -170,7 +185,6 @@ def get_all_users() -> List[Dict]:
     return users
 
 def delete_user(user_id: int) -> bool:
-    """Löscht nur normale Benutzer (nicht Admins)"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM users WHERE id = ? AND is_admin = 0", (user_id,))
@@ -180,7 +194,6 @@ def delete_user(user_id: int) -> bool:
     return deleted
 
 def update_user(user_id: int, new_username: Optional[str], new_password: Optional[str]) -> (bool, str):
-    """Aktualisiert normale Benutzer; Admins sind geschützt."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,))
@@ -207,6 +220,43 @@ def update_user(user_id: int, new_username: Optional[str], new_password: Optiona
     return True, "ok"
 
 # ======================================================
+# 🔑 JWT-HILFSFUNKTIONEN
+# ======================================================
+
+def create_token(username: str, is_admin: bool) -> str:
+    # timezone-aware, vermeidet DeprecationWarning
+    exp = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=JWT_EXPIRE_MINUTES)
+    payload = {
+        "user": username,
+        "is_admin": is_admin,
+        "exp": exp
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    if isinstance(token, bytes):  # ältere PyJWT
+        token = token.decode("utf-8")
+    return token
+
+def decode_token(token: str):
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+
+def require_auth(request: web.Request, admin_required: bool = False):
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    tkn = auth.split(" ")[1]
+    data = decode_token(tkn)
+    if not data:
+        return None
+    if admin_required and not data.get("is_admin"):
+        return None
+    return data
+
+# ======================================================
 # 🌐 API
 # ======================================================
 
@@ -217,11 +267,12 @@ async def login(request: web.Request) -> web.Response:
     result = check_user(username, password)
 
     if result["ok"]:
-        if result["admin"]:
-            print(f"👑 Admin-Login: {username}")
-            return web.Response(status=202, text="admin")
-        print(f"✅ Login erfolgreich: {username}")
-        return web.Response(status=200, text="OK")
+        token = create_token(username, result["admin"])
+        print(("👑 Admin" if result["admin"] else "✅ Benutzer"), f"angemeldet: {username}")
+        return web.json_response({
+            "token": token,
+            "expires_in": JWT_EXPIRE_MINUTES * 60
+        }, status=202 if result["admin"] else 200)
 
     print(f"❌ Login fehlgeschlagen: {username}")
     return web.Response(status=403, text="Wrong credentials")
@@ -237,31 +288,56 @@ async def register(request: web.Request) -> web.Response:
     return web.Response(status=500, text="Error creating user")
 
 async def offer(request: web.Request) -> web.Response:
-    params = await request.json()
-    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-    pc = RTCPeerConnection()
-    pcs.add(pc)
+    user = require_auth(request)
+    if not user:
+        return web.Response(status=401, text="Unauthorized")
 
-    @pc.on("connectionstatechange")
-    async def on_state_change():
-        if pc.connectionState in ("failed", "closed", "disconnected"):
-            await pc.close()
-            pcs.discard(pc)
+    try:
+        params = await request.json()
+        offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+        pc = RTCPeerConnection()
+        pcs.add(pc)
 
-    await pc.setRemoteDescription(offer)
-    track = relay.subscribe(camera)
-    pc.addTrack(track)
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-    return web.json_response({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type})
+        @pc.on("connectionstatechange")
+        async def on_state_change():
+            if pc.connectionState in ("failed", "closed", "disconnected"):
+                await pc.close()
+                pcs.discard(pc)
+
+        await pc.setRemoteDescription(offer)
+        track = relay.subscribe(camera)
+        pc.addTrack(track)
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+        print(f"📡 Stream gestartet für {user['user']} ({'Admin' if user['is_admin'] else 'User'})")
+        return web.json_response({
+            "sdp": pc.localDescription.sdp,
+            "type": pc.localDescription.type
+        })
+    except Exception:
+        print("💥 [offer] Fehler:\n" + traceback.format_exc())
+        return web.Response(status=500, text="Offer error")
 
 async def motion_status(request: web.Request) -> web.Response:
+    if not require_auth(request):
+        return web.Response(status=401, text="Unauthorized")
     return web.json_response({"motion": bool(camera.motion_detected)})
 
 async def admin_users(request: web.Request) -> web.Response:
-    return web.json_response(get_all_users())
+    auth_data = require_auth(request, admin_required=True)
+    if not auth_data:
+        return web.Response(status=401, text="Unauthorized")
+    try:
+        users = get_all_users()
+        print(f"👑 Admin '{auth_data['user']}' hat {len(users)} Benutzer abgerufen.")
+        return web.json_response(users)
+    except Exception:
+        print("💥 Fehler bei /admin/users:\n" + traceback.format_exc())
+        return web.Response(status=500, text="Server error")
 
 async def admin_delete(request: web.Request) -> web.Response:
+    if not require_auth(request, admin_required=True):
+        return web.Response(status=401, text="Unauthorized")
     data = await request.json()
     user_id = data.get("id")
     if user_id is None:
@@ -271,6 +347,9 @@ async def admin_delete(request: web.Request) -> web.Response:
     return web.Response(status=404, text="User not found or admin")
 
 async def admin_update(request: web.Request) -> web.Response:
+    if not require_auth(request, admin_required=True):
+        return web.Response(status=401, text="Unauthorized")
+
     data = await request.json()
     user_id = data.get("id")
     new_name = (data.get("username") or "").strip()
@@ -287,6 +366,10 @@ async def admin_update(request: web.Request) -> web.Response:
     if reason == "name_exists":
         return web.Response(status=409, text="Name exists")
     return web.Response(status=404, text="User not found")
+
+# ======================================================
+# 🔧 FRONTEND
+# ======================================================
 
 async def index(request: web.Request) -> web.Response:
     return web.FileResponse("templates/index1.html")
@@ -315,10 +398,10 @@ def create_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/", index)
     app.router.add_get("/client1.js", javascript)
-    app.router.add_get("/motion", motion_status)
-    app.router.add_post("/offer", offer)
     app.router.add_post("/login", login)
     app.router.add_post("/register", register)
+    app.router.add_post("/offer", offer)
+    app.router.add_get("/motion", motion_status)
     app.router.add_get("/admin/users", admin_users)
     app.router.add_post("/admin/delete", admin_delete)
     app.router.add_post("/admin/update", admin_update)
