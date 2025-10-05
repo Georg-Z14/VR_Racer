@@ -5,10 +5,7 @@ import numpy as np
 import threading
 
 class MotionCameraStream(VideoStreamTrack):
-    """
-    Kamera-Stream mit dynamischem Resize + Bewegungserkennung.
-    Erkennt Bildänderungen über Frame-Differenz.
-    """
+    """Kamera-Stream mit Resize + Bewegungserkennung."""
     def __init__(self, camera_index=0, target_size=(1280, 720), sensitivity=40):
         super().__init__()
         self.cap = cv2.VideoCapture(camera_index)
@@ -16,23 +13,19 @@ class MotionCameraStream(VideoStreamTrack):
         self.prev_gray = None
         self.motion_detected = False
         self.sensitivity = sensitivity
+        self.running = True
 
         if not self.cap.isOpened():
             print(f"❌ Kamera mit Index {camera_index} konnte nicht geöffnet werden!")
             self.frame = np.zeros((target_size[1], target_size[0], 3), dtype=np.uint8)
         else:
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, target_size[0])
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, target_size[1])
             self.cap.set(cv2.CAP_PROP_FPS, 30)
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
-            self.cap.set(cv2.CAP_PROP_EXPOSURE, 0)
-            self.cap.set(cv2.CAP_PROP_AUTO_WB, 0)
 
         self.frame = np.zeros((target_size[1], target_size[0], 3), dtype=np.uint8)
-        self.running = True
         self._target_w, self._target_h = target_size
-
         self.thread = threading.Thread(target=self._reader, daemon=True)
         self.thread.start()
 
@@ -65,7 +58,7 @@ class MotionCameraStream(VideoStreamTrack):
             if ret:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 tw, th = self.get_target_size()
-                if tw and th and (frame.shape[1] != tw or frame.shape[0] != th):
+                if (frame.shape[1], frame.shape[0]) != (tw, th):
                     frame = cv2.resize(frame, (tw, th), interpolation=cv2.INTER_AREA)
                 self.frame = frame
                 self._detect_motion(frame)

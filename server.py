@@ -224,7 +224,6 @@ def update_user(user_id: int, new_username: Optional[str], new_password: Optiona
 # ======================================================
 
 def create_token(username: str, is_admin: bool) -> str:
-    # timezone-aware, vermeidet DeprecationWarning
     exp = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=JWT_EXPIRE_MINUTES)
     payload = {
         "user": username,
@@ -232,7 +231,7 @@ def create_token(username: str, is_admin: bool) -> str:
         "exp": exp
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
-    if isinstance(token, bytes):  # ältere PyJWT
+    if isinstance(token, bytes):
         token = token.decode("utf-8")
     return token
 
