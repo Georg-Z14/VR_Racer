@@ -338,16 +338,9 @@ function monitorFPS(video) {
 }
 
 let hudPing = "📡 -- ms", hudFps = "🎥 -- FPS";
-let pingValue = 0, fpsValue = 0;
-
 function updateHud(text, isFps = false) {
-  if (isFps) {
-    hudFps = text;
-    fpsValue = parseInt(text.match(/\d+/));
-  } else {
-    hudPing = text;
-    pingValue = parseFloat(text.match(/\d+(\.\d+)?/));
-  }
+  if (isFps) hudFps = text;
+  else hudPing = text;
   hud.textContent = `${hudPing} | ${hudFps}`;
 }
 
@@ -404,7 +397,7 @@ function toggleView() {
 }
 
 /* =====================================================
-   👁️ PASSWORT-TOGGLE
+   👁️ PASSWORT-TOGGLE + ENTER LOGIN
 ===================================================== */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -425,6 +418,32 @@ document.addEventListener("DOMContentLoaded", () => {
       else { npw.type = "password"; ntoggle.textContent = "👁️"; }
     });
   }
+
+  // ⌨️ ENTER-Taste Login
+  const loginInputs = [document.getElementById("username"), document.getElementById("password")];
+  loginInputs.forEach(input => {
+    if (input) {
+      input.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          login();
+        }
+      });
+    }
+  });
+
+  // ⌨️ ENTER-Taste Registrierung
+  const registerInputs = [document.getElementById("new-username"), document.getElementById("new-password")];
+  registerInputs.forEach(input => {
+    if (input) {
+      input.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          registerUser();
+        }
+      });
+    }
+  });
 });
 
 /* =====================================================

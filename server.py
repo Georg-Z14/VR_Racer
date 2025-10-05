@@ -2,17 +2,20 @@ import asyncio
 import json
 import sqlite3
 import hashlib
+import os
 from typing import List, Dict, Optional
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaRelay
 from camera_stream import MotionCameraStream
 from cryptography.fernet import Fernet
+from dotenv import load_dotenv
 
 # ======================================================
 # ⚙️ BASIS
 # ======================================================
 
+load_dotenv()  # .env laden
 pcs = set()
 relay = MediaRelay()
 camera = MotionCameraStream(camera_index=0, target_size=(1280, 720))
@@ -21,10 +24,15 @@ DB_PATH = "users.db"
 KEY_FILE = "secret.key"
 
 # ======================================================
-# 🔐 VERSCHLÜSSELUNG / HASH
+# 🔐 HASH & VERSCHLÜSSELUNG
 # ======================================================
 
+def hash_pw(password: str) -> str:
+    """Sicherer Hash mit SHA256"""
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
 def load_key() -> bytes:
+    """Lädt oder erzeugt AES-Verschlüsselungs-Key für Usernamen"""
     try:
         with open(KEY_FILE, "rb") as f:
             return f.read()
@@ -36,9 +44,6 @@ def load_key() -> bytes:
         return key
 
 fernet = Fernet(load_key())
-
-def hash_pw(password: str) -> str:
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 # ======================================================
 # 🗄️ DATENBANK
@@ -52,6 +57,7 @@ def ensure_is_admin_column(c: sqlite3.Cursor):
         c.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
 
 def init_db():
+    """Initialisiert die Datenbank und legt Admins aus .env an"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
@@ -63,24 +69,32 @@ def init_db():
         )
     """)
     conn.commit()
-
-    # Migration (falls alte DB ohne is_admin):
     ensure_is_admin_column(c)
     conn.commit()
 
-    # Standard-Admins hinzufügen, falls sie fehlen
-    admins = [("Admin_G", "pass123"), ("Admin_D", "pass123")]
-    for name, pw in admins:
-        c.execute("SELECT id, username FROM users")
+    # Admins aus .env laden
+    admins = {
+        "Admin_G": os.getenv("ADMIN_G_PASS"),
+        "Admin_D": os.getenv("ADMIN_D_PASS")
+    }
+
+    for name, pw in admins.items():
+        if not pw:
+            print(f"⚠️ Kein Passwort in .env für {name} gefunden – übersprungen.")
+            continue
+
+        # Existiert schon?
+        c.execute("SELECT username FROM users")
         rows = c.fetchall()
         exists = False
-        for _id, enc in rows:
+        for (enc,) in rows:
             try:
                 if fernet.decrypt(enc.encode()).decode() == name:
                     exists = True
                     break
             except Exception:
                 continue
+
         if not exists:
             enc_user = fernet.encrypt(name.encode()).decode()
             c.execute(
@@ -156,7 +170,7 @@ def get_all_users() -> List[Dict]:
     return users
 
 def delete_user(user_id: int) -> bool:
-    """Löscht NUR normale Benutzer (is_admin=0)."""
+    """Löscht nur normale Benutzer (nicht Admins)"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM users WHERE id = ? AND is_admin = 0", (user_id,))
@@ -166,10 +180,9 @@ def delete_user(user_id: int) -> bool:
     return deleted
 
 def update_user(user_id: int, new_username: Optional[str], new_password: Optional[str]) -> (bool, str):
-    """Aktualisiert Name/Passwort für normale User. Admins sind schreibgeschützt."""
+    """Aktualisiert normale Benutzer; Admins sind geschützt."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # Admins geschützt?
     c.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,))
     row = c.fetchone()
     if not row:
@@ -179,7 +192,6 @@ def update_user(user_id: int, new_username: Optional[str], new_password: Optiona
         conn.close()
         return False, "admin_locked"
 
-    # Username prüfen
     if new_username:
         if username_exists(new_username):
             conn.close()
@@ -187,7 +199,6 @@ def update_user(user_id: int, new_username: Optional[str], new_password: Optiona
         enc = fernet.encrypt(new_username.encode()).decode()
         c.execute("UPDATE users SET username = ? WHERE id = ?", (enc, user_id))
 
-    # Passwort setzen
     if new_password:
         c.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_pw(new_password), user_id))
 
@@ -225,7 +236,6 @@ async def register(request: web.Request) -> web.Response:
         return web.Response(status=200, text="User created")
     return web.Response(status=500, text="Error creating user")
 
-# --- WebRTC Offer ---
 async def offer(request: web.Request) -> web.Response:
     params = await request.json()
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
@@ -248,7 +258,6 @@ async def offer(request: web.Request) -> web.Response:
 async def motion_status(request: web.Request) -> web.Response:
     return web.json_response({"motion": bool(camera.motion_detected)})
 
-# --- Admin API ---
 async def admin_users(request: web.Request) -> web.Response:
     return web.json_response(get_all_users())
 
@@ -279,7 +288,6 @@ async def admin_update(request: web.Request) -> web.Response:
         return web.Response(status=409, text="Name exists")
     return web.Response(status=404, text="User not found")
 
-# --- Static ---
 async def index(request: web.Request) -> web.Response:
     return web.FileResponse("templates/index1.html")
 
@@ -309,14 +317,11 @@ def create_app() -> web.Application:
     app.router.add_get("/client1.js", javascript)
     app.router.add_get("/motion", motion_status)
     app.router.add_post("/offer", offer)
-
     app.router.add_post("/login", login)
     app.router.add_post("/register", register)
-
     app.router.add_get("/admin/users", admin_users)
     app.router.add_post("/admin/delete", admin_delete)
     app.router.add_post("/admin/update", admin_update)
-
     app.router.add_static("/static/", path="static", name="static")
     app.on_shutdown.append(on_shutdown)
     return app
