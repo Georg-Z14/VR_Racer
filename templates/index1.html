@@ -12,66 +12,63 @@
   <h1>🚗 VR-Racer Live</h1>
 </header>
 
-<!-- 🔐 LOGIN -->
+<!-- LOGIN -->
 <div id="login-card" class="card">
   <h2>🔑 Login</h2>
   <div class="password-wrapper">
     <input type="text" id="username" placeholder="Benutzername" required>
   </div>
   <div class="password-wrapper">
-    <input type="password" id="password" placeholder="Passwort" required>
+    <input type="password" id="password" placeholder="Passwort eingeben" required>
     <button type="button" id="toggle-password">👁️</button>
   </div>
   <button onclick="login()">Anmelden</button>
   <p id="login-status"></p>
-  <p>Kein Konto? <a href="#" onclick="switchToRegister()">Registrieren</a></p>
+  <p class="switch-text">Noch kein Konto? <a href="#" class="switch-link" onclick="switchToRegister()">Registrieren</a></p>
 </div>
 
-<!-- 🧾 REGISTRIERUNG -->
+<!-- REGISTRIERUNG -->
 <div id="register-card" class="card" style="display:none;">
   <h2>🆕 Konto anlegen</h2>
   <div class="password-wrapper">
     <input type="text" id="new-username" placeholder="Benutzername" required>
   </div>
-  <div class="password-wrapper">
+  <div class="register-password-wrapper">
     <input type="password" id="new-password" placeholder="Passwort erstellen" required>
     <button type="button" id="toggle-new-password">👁️</button>
   </div>
   <button onclick="registerUser()">Registrieren</button>
   <p id="register-status"></p>
-  <p>Schon ein Konto? <a href="#" onclick="switchToLogin()">Zurück zum Login</a></p>
+  <p class="switch-text">Schon ein Konto? <a href="#" class="switch-link" onclick="switchToLogin()">Zurück zum Login</a></p>
 </div>
 
-<!-- 📺 STREAM -->
+<!-- STREAM -->
 <div id="stream-card" class="card" style="display:none;">
-  <div class="live-badge">🔴 LIVE</div>
   <video id="video" autoplay playsinline ondblclick="toggleFullscreen()"></video>
-
   <div class="status-bar">
-    <p id="status">🔄 Verbinde…</p>
+    <p id="status">🔄 Verbinde...</p>
     <div class="hud">📡 -- ms | 🎥 -- FPS</div>
   </div>
 </div>
 
-<!-- 👑 ADMIN-OVERLAY -->
-<div id="admin-overlay" class="admin-overlay" style="display:none;">
-  <div class="admin-popup">
+<!-- ADMIN PANEL -->
+<div id="admin-overlay">
+  <div id="admin-popup">
     <h2>👑 Benutzerverwaltung</h2>
     <p>Hier kannst du Benutzer anzeigen und löschen.</p>
-
-    <div id="admin-list" class="admin-list">
-      <p>⏳ Lade Benutzer …</p>
-    </div>
-
-    <div style="text-align:center;margin-top:1em;">
+    <div id="admin-list"><p>⏳ Lade Benutzer...</p></div>
+    <div class="admin-actions">
       <button onclick="loadAdminPanel()">🔄 Aktualisieren</button>
-      <button onclick="closeAdminPanel()">✖️ Schließen</button>
+      <button onclick="closeAdminPanel()">❌ Schließen</button>
     </div>
   </div>
 </div>
 
+<!-- FEEDBACK -->
+<div id="ui-feedback" class="ui-feedback"></div>
+
 <footer>
-  <p>Made for <strong>VR-Cars</strong> | Powered by <strong>VR-Racer 🚀</strong></p>
+  <p>Made for <strong>VR-Cars</strong> | Powered by VR-Racer 🚀</p>
 </footer>
 
 <script src="../static/js/client1.js"></script>

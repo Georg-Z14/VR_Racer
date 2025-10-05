@@ -21,7 +21,6 @@ body {
   padding: 2vh 2vw;
   overflow-x: hidden;
 }
-
 body::before {
   content: "";
   position: fixed;
@@ -29,10 +28,10 @@ body::before {
   width: 200%;
   height: 200%;
   background: repeating-linear-gradient(
-    0deg, rgba(0, 224, 255, 0.1) 0, rgba(0, 224, 255, 0.1) 2px, transparent 2px, transparent 50px
+    0deg, rgba(0,224,255,0.1) 0, rgba(0,224,255,0.1) 2px, transparent 2px, transparent 50px
   ),
   repeating-linear-gradient(
-    90deg, rgba(0, 224, 255, 0.1) 0, rgba(0, 224, 255, 0.1) 2px, transparent 2px, transparent 50px
+    90deg, rgba(0,224,255,0.1) 0, rgba(0,224,255,0.1) 2px, transparent 2px, transparent 50px
   );
   animation: moveGrid 20s linear infinite;
   z-index: -1;
@@ -51,7 +50,7 @@ header {
   height: clamp(80px, 15vw, 140px);
   border-radius: 50%;
   border: 3px solid var(--primary);
-  box-shadow: 0 0 25px rgba(0, 224, 255, 0.8);
+  box-shadow: 0 0 25px rgba(0,224,255,0.8);
   animation: pulse 3s infinite alternate;
 }
 @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.08); } }
@@ -60,17 +59,17 @@ h1 {
   font-size: clamp(2em, 5vw, 3em);
   font-weight: 700;
   color: var(--primary);
-  text-shadow: 0 0 25px rgba(0, 224, 255, 0.8);
+  text-shadow: 0 0 25px rgba(0,224,255,0.8);
 }
 
 /* ======================================================
    LOGIN / REGISTER
 ====================================================== */
 #login-card, #register-card {
-  background: linear-gradient(135deg, rgba(0, 224, 255, 0.15), rgba(255, 0, 122, 0.15));
+  background: linear-gradient(135deg, rgba(0,224,255,0.15), rgba(255,0,122,0.15));
   border-radius: 25px;
   padding: clamp(40px, 6vw, 80px);
-  box-shadow: 0 0 45px rgba(0, 224, 255, 0.3);
+  box-shadow: 0 0 45px rgba(0,224,255,0.3);
   text-align: center;
   width: min(95%, 650px);
   transition: all 0.3s ease;
@@ -80,20 +79,16 @@ h1 {
   justify-content: center;
   animation: fadeInUp 1s ease forwards;
 }
-
 #login-card.success, #register-card.success {
   animation: successFlash 0.5s ease;
-  box-shadow: 0 0 45px rgba(0, 255, 128, 0.6);
+  box-shadow: 0 0 45px rgba(0,255,128,0.6);
 }
 #login-card.error, #register-card.error {
   animation: errorShake 0.5s ease;
-  box-shadow: 0 0 45px rgba(255, 0, 0, 0.6);
+  box-shadow: 0 0 45px rgba(255,0,0,0.6);
 }
-
 @keyframes successFlash {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.05); }
-  100% { transform: scale(1); }
+  0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); }
 }
 @keyframes errorShake {
   0%,100%{transform:translateX(0);}
@@ -116,7 +111,6 @@ h1 {
   margin: 0 auto 25px auto;
   width: 100%;
 }
-
 #username, #password, #new-username, #new-password {
   flex: 1;
   height: clamp(45px, 5vh, 55px);
@@ -128,7 +122,6 @@ h1 {
   padding: 0 14px;
   outline: none;
 }
-
 #toggle-password, #toggle-new-password {
   height: clamp(45px, 5vh, 55px);
   width: clamp(45px, 5vh, 55px);
@@ -156,7 +149,7 @@ h1 {
   color: #fff;
   cursor: pointer;
   margin-top: 10px;
-  box-shadow: 0 0 15px rgba(0, 224, 255, 0.25);
+  box-shadow: 0 0 15px rgba(0,224,255,0.25);
   transition: transform 0.25s ease, box-shadow 0.25s ease;
   width: fit-content;
   align-self: center;
@@ -165,7 +158,6 @@ h1 {
   transform: scale(1.05);
   box-shadow: 0 0 25px var(--secondary);
 }
-
 #login-status, #register-status {
   margin-top: 12px;
   font-weight: bold;
@@ -174,7 +166,7 @@ h1 {
 }
 
 /* ======================================================
-   STREAM / HUD / OVERLAY
+   STREAM / OVERLAY
 ====================================================== */
 #stream-card {
   position: relative;
@@ -187,63 +179,38 @@ video {
   border-radius: 14px;
   border: 3px solid var(--primary);
   background: #000;
-  box-shadow: 0 0 25px rgba(0, 224, 255, 0.7);
+  box-shadow: 0 0 25px rgba(0,224,255,0.7);
 }
-video.neon-active {
-  animation: neonPulse 2s ease-in-out infinite alternate;
-}
-@keyframes neonPulse {
-  0% { box-shadow: 0 0 25px rgba(0, 224, 255, .5); }
-  100% { box-shadow: 0 0 60px rgba(0, 224, 255, 1); }
-}
-
-/* Statusbar */
 .status-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-top: 10px;
-  position: relative;
   height: 40px;
-  width: 100%;
+  position: relative;
 }
-#status {
-  color: #00ff80;
-  font-weight: bold;
-  font-size: 1.1em;
-}
-
 .hud {
   font-size: 1em;
   color: var(--primary);
   font-weight: bold;
   text-shadow: 0 0 10px var(--primary);
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
 }
 
-/* Overlay zentriert unten */
+/* Buttons unter dem Stream — auf gleicher Höhe wie 'Verbunden' */
 .control-overlay {
   position: absolute;
-  bottom: 40px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
   display: flex;
   flex-direction: row;
-  gap: 14px;
+  gap: 12px;
   justify-content: center;
   align-items: center;
-  transition: opacity 0.3s ease;
-}
-.control-overlay.hidden {
-  opacity: 0;
-  pointer-events: none;
 }
 .overlay-btn {
-  width: 48px;
-  height: 48px;
+  width: 45px;
+  height: 45px;
   border-radius: 50%;
   border: 2px solid var(--primary);
   background: rgba(20,20,20,0.7);
@@ -259,92 +226,116 @@ video.neon-active {
 }
 
 /* ======================================================
-   UI FEEDBACK
+   ADMIN PANEL POPUP
 ====================================================== */
-.ui-feedback {
+#admin-overlay {
   position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(20, 20, 20, 0.9);
-  color: white;
-  padding: 10px 20px;
-  border-radius: 10px;
-  font-weight: bold;
-  text-shadow: 0 0 10px #000;
-  opacity: 0;
-  transition: all 0.3s ease;
-  z-index: 1000;
-}
-.ui-feedback.show {
-  opacity: 1;
-  transform: translateX(-50%) translateY(-10px);
-}
-.ui-feedback.success {
-  background: rgba(0, 255, 128, 0.15);
-  border: 2px solid #00ff80;
-  box-shadow: 0 0 25px #00ff80;
-  color: #00ff80;
-}
-.ui-feedback.error {
-  background: rgba(255, 0, 60, 0.15);
-  border: 2px solid #ff0040;
-  box-shadow: 0 0 25px #ff0040;
-  color: #ff0040;
-}
-
-/* ======================================================
-   ADMIN PANEL
-====================================================== */
-#admin-card {
-  background: linear-gradient(135deg, rgba(0, 224, 255, 0.15), rgba(255, 0, 122, 0.15));
-  border-radius: 25px;
-  padding: clamp(40px, 5vw, 70px);
-  box-shadow: 0 0 45px rgba(0, 224, 255, 0.3);
-  text-align: center;
-  width: min(95%, 750px);
-  backdrop-filter: blur(10px);
-  display: flex;
-  flex-direction: column;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.85);
+  display: none;
   justify-content: center;
-  animation: fadeInUp 1s ease forwards;
+  align-items: center;
+  z-index: 2000;
+  backdrop-filter: blur(6px);
 }
-
-.admin-list {
-  margin-top: 20px;
-  background: rgba(20,20,20,0.6);
-  border-radius: 10px;
-  padding: 15px;
-  max-height: 300px;
+#admin-popup {
+  background: linear-gradient(145deg, rgba(0,224,255,0.1), rgba(255,0,122,0.1));
+  border: 2px solid var(--primary);
+  border-radius: 22px;
+  box-shadow: 0 0 45px rgba(0,224,255,0.6);
+  width: min(95%, 720px);
+  padding: 40px 50px;
+  text-align: center;
+}
+#admin-popup h2 {
+  color: var(--primary);
+  font-size: 1.8em;
+  text-shadow: 0 0 20px var(--primary);
+  margin-bottom: 10px;
+}
+#admin-popup p {
+  color: var(--text-light);
+  opacity: 0.85;
+  margin-bottom: 20px;
+}
+#admin-list {
+  background: rgba(20,20,20,0.65);
+  border-radius: 12px;
+  padding: 12px;
+  max-height: 320px;
   overflow-y: auto;
-  box-shadow: inset 0 0 15px rgba(0,224,255,0.2);
+  box-shadow: inset 0 0 25px rgba(0,224,255,0.25);
 }
 
+/* Benutzerzeile + Buttons */
 .user-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(0,255,255,0.1);
 }
-
-.user-row .username {
+.user-row input {
+  flex: 1;
+  max-width: 45%;
+  text-align: center;
+  height: 38px;
+  background: rgba(0,10,20,0.9);
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  color: var(--text-light);
   font-weight: 600;
-  color: var(--primary);
+  box-shadow: inset 0 0 10px rgba(0,224,255,0.3);
+  transition: 0.2s;
 }
-
-.delete-btn {
-  background: rgba(255,0,60,0.8);
+.user-row input:focus {
+  box-shadow: 0 0 15px var(--primary);
+  outline: none;
+}
+.admin-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.save-btn {
+  background: linear-gradient(135deg, #00ffb3, #00cfff);
   border: none;
-  border-radius: 6px;
-  color: white;
-  padding: 5px 10px;
+  border-radius: 8px;
+  width: 42px;
+  height: 38px;
+  font-size: 1.1em;
+  color: #000;
   cursor: pointer;
-  transition: all 0.2s;
+  box-shadow: 0 0 10px rgba(0,255,180,0.4);
+  transition: all 0.2s ease;
+}
+.save-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 18px #00ffb3;
+}
+.delete-btn {
+  background: linear-gradient(135deg, #ff0055, #ff00aa);
+  border: none;
+  border-radius: 8px;
+  width: 42px;
+  height: 38px;
+  font-size: 1.1em;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(255,0,100,0.4);
+  transition: all 0.2s ease;
 }
 .delete-btn:hover {
-  background: #ff0040;
-  box-shadow: 0 0 10px #ff0040;
+  transform: scale(1.1);
+  box-shadow: 0 0 18px #ff0040;
+}
+.admin-badge {
+  font-size: 1.3em;
+  margin-left: 5px;
+  text-shadow: 0 0 10px gold;
 }
 
 /* ======================================================
@@ -355,4 +346,155 @@ footer {
   font-size: 0.9em;
   color: #888;
   text-align: center;
+}
+
+/* ======================================================
+   ADMIN-BUTTONS – NEON-STIL + ZENTRIERTE ICONS
+====================================================== */
+
+/* ✅ Aktualisieren (blauer Neon) */
+.admin-actions button:first-child {
+  background: linear-gradient(135deg, #00e0ff, #00ffa3);
+  border: 2px solid var(--primary);
+  border-radius: 8px;
+  padding: 10px 24px;
+  font-weight: 600;
+  font-size: 0.95em;
+  color: #fff;
+  text-shadow: 0 0 8px rgba(0,224,255,0.8);
+  cursor: pointer;
+  box-shadow:
+    0 0 15px rgba(0,224,255,0.4),
+    inset 0 0 10px rgba(0,224,255,0.3);
+  transition: all 0.25s ease-in-out;
+}
+.admin-actions button:first-child:hover {
+  transform: scale(1.05);
+  box-shadow:
+    0 0 30px rgba(0,224,255,0.9),
+    0 0 40px rgba(0,255,200,0.4);
+  background: linear-gradient(135deg, #00ffa3, #00e0ff);
+}
+
+/* ❌ Schließen (rötlicher Neon-Look) */
+.admin-actions button:last-child {
+  background: linear-gradient(135deg, #ff007a, #ff2d55);
+  border: 2px solid #ff007a;
+  border-radius: 8px;
+  padding: 10px 24px;
+  font-weight: 600;
+  font-size: 0.95em;
+  color: #fff;
+  text-shadow: 0 0 8px rgba(255,0,100,0.8);
+  cursor: pointer;
+  box-shadow:
+    0 0 15px rgba(255,0,100,0.4),
+    inset 0 0 10px rgba(255,0,100,0.25);
+  transition: all 0.25s ease-in-out;
+}
+.admin-actions button:last-child:hover {
+  transform: scale(1.05);
+  box-shadow:
+    0 0 30px rgba(255,0,120,0.9),
+    0 0 40px rgba(255,60,160,0.4);
+  background: linear-gradient(135deg, #ff2d55, #ff007a);
+}
+
+/* 💾 SPEICHERN – gleiches Design + mittig zentriert */
+.save-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #00ffc6, #00baff);
+  border: none;
+  border-radius: 8px;
+  width: 40px;
+  height: 40px;
+  font-size: 1.1em;
+  color: #000;
+  cursor: pointer;
+  box-shadow:
+    0 0 10px rgba(0,255,200,0.4),
+    inset 0 0 8px rgba(0,255,255,0.3);
+  text-shadow: 0 0 8px rgba(0,255,255,0.8);
+  transition: all 0.25s ease-in-out;
+}
+.save-btn:hover {
+  transform: scale(1.1);
+  box-shadow:
+    0 0 20px rgba(0,255,255,0.8),
+    0 0 25px rgba(0,255,200,0.6);
+}
+
+/* 🗑️ LÖSCHEN – identisch zentriert */
+.delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #ff0040, #ff00aa);
+  border: none;
+  border-radius: 8px;
+  width: 40px;
+  height: 40px;
+  font-size: 1.1em;
+  color: #fff;
+  cursor: pointer;
+  box-shadow:
+    0 0 10px rgba(255,0,100,0.4),
+    inset 0 0 8px rgba(255,0,100,0.3);
+  transition: all 0.25s ease-in-out;
+}
+.delete-btn:hover {
+  transform: scale(1.1);
+  box-shadow:
+    0 0 20px rgba(255,0,100,0.8),
+    0 0 25px rgba(255,50,200,0.6);
+}
+
+/* ======================================================
+   STEUER-BUTTONS – auf gleicher Höhe wie "Verbunden"
+====================================================== */
+.status-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  height: 48px;
+}
+
+/* Buttons (VR Ansicht, Werkzeug, Admin) */
+.control-overlay {
+  position: absolute;
+  top: 50%; /* exakt mittig zur Status-Bar */
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 18px;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Neon-Stil wie gehabt */
+.overlay-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 2px solid var(--primary);
+  background: rgba(20, 20, 20, 0.75);
+  color: var(--text-light);
+  font-size: 1.2em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 15px rgba(0, 224, 255, 0.6);
+  transition: all 0.25s ease;
+}
+
+.overlay-btn:hover {
+  transform: translateY(-2px) scale(1.1);
+  box-shadow:
+    0 0 25px var(--secondary),
+    0 0 40px rgba(255, 0, 150, 0.3);
 }

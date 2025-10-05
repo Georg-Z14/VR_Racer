@@ -30,6 +30,8 @@ async function login() {
       isAdmin = false;
       card.classList.add("success");
       status.textContent = "✅ Login erfolgreich!";
+      showFeedback("✅ Login erfolgreich!", "success");
+
       setTimeout(() => {
         card.style.display = "none";
         document.getElementById("stream-card").style.display = "block";
@@ -41,6 +43,8 @@ async function login() {
       isAdmin = true;
       card.classList.add("success");
       status.textContent = "👑 Admin-Login erfolgreich!";
+      showFeedback("👑 Admin-Login erfolgreich!", "success");
+
       setTimeout(() => {
         card.style.display = "none";
         document.getElementById("stream-card").style.display = "block";
@@ -49,13 +53,16 @@ async function login() {
     } else if (res.status === 403) {
       card.classList.add("error");
       status.textContent = "❌ Benutzername oder Passwort falsch!";
+      showFeedback("❌ Benutzername oder Passwort falsch!", "error");
     } else {
       card.classList.add("error");
       status.textContent = "⚠️ Unbekannter Fehler beim Login!";
+      showFeedback("⚠️ Unbekannter Fehler beim Login!", "error");
     }
   } catch {
     card.classList.add("error");
     status.textContent = "⚠️ Server nicht erreichbar!";
+    showFeedback("⚠️ Server nicht erreichbar!", "error");
   }
 }
 
@@ -71,6 +78,7 @@ async function registerUser() {
   if (!username || !password) {
     card.classList.add("error");
     status.textContent = "⚠️ Bitte alle Felder ausfüllen!";
+    showFeedback("⚠️ Bitte alle Felder ausfüllen!", "error");
     return;
   }
 
@@ -84,17 +92,21 @@ async function registerUser() {
     if (res.status === 200) {
       card.classList.add("success");
       status.textContent = "✅ Benutzer erfolgreich angelegt!";
+      showFeedback("✅ Benutzer erfolgreich angelegt!", "success");
       setTimeout(() => switchToLogin(), 900);
     } else if (res.status === 409) {
       card.classList.add("error");
       status.textContent = "❌ Benutzername bereits vergeben!";
+      showFeedback("❌ Benutzername bereits vergeben!", "error");
     } else {
       card.classList.add("error");
       status.textContent = "⚠️ Fehler bei der Registrierung!";
+      showFeedback("⚠️ Fehler bei der Registrierung!", "error");
     }
   } catch {
     card.classList.add("error");
     status.textContent = "⚠️ Server nicht erreichbar!";
+    showFeedback("⚠️ Server nicht erreichbar!", "error");
   }
 }
 
@@ -102,33 +114,28 @@ function switchToRegister() {
   document.getElementById("login-card").style.display = "none";
   document.getElementById("register-card").style.display = "block";
 }
-
 function switchToLogin() {
   document.getElementById("register-card").style.display = "none";
   document.getElementById("login-card").style.display = "block";
 }
 
 /* =====================================================
-   👑 ADMIN OVERLAY (Liste / Löschen / Ändern)
+   👑 ADMIN OVERLAY
 ===================================================== */
 
 function openAdminPanel() {
   const overlay = document.getElementById("admin-overlay");
-  if (!overlay) return;
-  overlay.style.display = "block";
+  overlay.style.display = "flex";
   loadAdminPanel();
 }
 
 function closeAdminPanel() {
-  const overlay = document.getElementById("admin-overlay");
-  if (!overlay) return;
-  overlay.style.display = "none";
+  document.getElementById("admin-overlay").style.display = "none";
 }
 
 async function loadAdminPanel() {
   const container = document.getElementById("admin-list");
-  if (!container) return;
-  container.innerHTML = "⏳ Lade Benutzer...";
+  container.innerHTML = "<p>⏳ Lade Benutzer...</p>";
 
   try {
     const res = await fetch("/admin/users");
@@ -136,8 +143,8 @@ async function loadAdminPanel() {
       container.innerHTML = "❌ Fehler beim Laden!";
       return;
     }
-    const users = await res.json();
 
+    const users = await res.json();
     if (!users || users.length === 0) {
       container.innerHTML = "<p>Keine Benutzer registriert.</p>";
       return;
@@ -148,34 +155,27 @@ async function loadAdminPanel() {
       const row = document.createElement("div");
       row.className = "user-row";
       row.innerHTML = `
-        <input class="admin-name-input" id="name-${u.id}" value="${escapeHtml(u.username)}" ${u.is_admin ? "disabled" : ""} />
-        <input class="admin-pass-input" id="pass-${u.id}" placeholder="${u.is_admin ? "Admin geschützt" : "Neues Passwort (optional)"}" type="text" ${u.is_admin ? "disabled" : ""} />
+        <input id="user-name-${u.id}" value="${escapeHtml(u.username)}" ${u.is_admin ? "disabled" : ""} />
+        <input id="user-pass-${u.id}" type="text" placeholder="${u.is_admin ? "Admin geschützt" : "Neues Passwort"}" ${u.is_admin ? "disabled" : ""}/>
         <div class="admin-actions">
-          <button class="save-btn" ${u.is_admin ? "disabled" : ""} onclick="saveUser(${u.id})">💾</button>
           <button class="delete-btn" ${u.is_admin ? "disabled" : ""} onclick="deleteUser(${u.id})">🗑️</button>
-          ${u.is_admin ? '<span class="admin-badge">👑</span>' : ""}
+          <button class="save-btn" ${u.is_admin ? "disabled" : ""} onclick="saveUser(${u.id})">💾</button>
+          ${u.is_admin ? "👑" : ""}
         </div>
       `;
       container.appendChild(row);
     });
   } catch (e) {
-    console.error(e);
-    container.innerHTML = "⚠️ Serverfehler beim Laden!";
+    container.innerHTML = "⚠️ Serverfehler!";
   }
 }
 
-function escapeHtml(s) {
-  return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-}
-
 async function saveUser(id) {
-  const nameEl = document.getElementById(`name-${id}`);
-  const passEl = document.getElementById(`pass-${id}`);
-  const newName = nameEl.value.trim();
-  const newPass = passEl.value.trim();
+  const newName = document.getElementById(`user-name-${id}`).value.trim();
+  const newPass = document.getElementById(`user-pass-${id}`).value.trim();
 
   if (!newName && !newPass) {
-    alert("Bitte Name und/oder Passwort ändern.");
+    showFeedback("⚠️ Bitte Name oder Passwort ändern!", "error");
     return;
   }
 
@@ -187,19 +187,17 @@ async function saveUser(id) {
     });
 
     if (res.status === 200) {
-      passEl.value = "";
+      showFeedback("✅ Benutzer aktualisiert!", "success");
       loadAdminPanel();
     } else if (res.status === 409) {
-      alert("❌ Benutzername bereits vergeben.");
+      showFeedback("❌ Benutzername bereits vergeben!", "error");
     } else if (res.status === 403) {
-      alert("⚠️ Admin-Konten sind geschützt.");
-    } else if (res.status === 404) {
-      alert("⚠️ Benutzer nicht gefunden.");
+      showFeedback("⚠️ Admin-Konto geschützt!", "error");
     } else {
-      alert("❌ Fehler beim Speichern.");
+      showFeedback("❌ Fehler beim Speichern!", "error");
     }
   } catch {
-    alert("⚠️ Server nicht erreichbar!");
+    showFeedback("⚠️ Server nicht erreichbar!", "error");
   }
 }
 
@@ -212,21 +210,25 @@ async function deleteUser(id) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id })
     });
-
     if (res.ok) {
+      showFeedback("✅ Benutzer gelöscht!", "success");
       loadAdminPanel();
-    } else if (res.status === 404) {
-      alert("⚠️ Benutzer nicht gefunden oder Admin (geschützt).");
     } else {
-      alert("❌ Fehler beim Löschen des Benutzers!");
+      showFeedback("❌ Fehler beim Löschen!", "error");
     }
   } catch {
-    alert("⚠️ Server nicht erreichbar!");
+    showFeedback("⚠️ Server nicht erreichbar!", "error");
   }
 }
 
+function escapeHtml(str) {
+  return str.replace(/[&<>"']/g, m => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]
+  ));
+}
+
 /* =====================================================
-   📡 STREAMING & WEBRTC
+   📡 STREAM & WEBRTC
 ===================================================== */
 
 const video = document.getElementById("video");
@@ -235,9 +237,7 @@ const hud = document.querySelector(".hud");
 
 async function start() {
   statusTxt.textContent = "🔄 Verbinde...";
-  pc = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-  });
+  pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
   pc.addTransceiver("video", { direction: "recvonly" });
 
   pc.ontrack = (event) => {
@@ -250,7 +250,6 @@ async function start() {
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
-
   const res = await fetch("/offer", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": authPassword || "" },
@@ -269,12 +268,11 @@ async function start() {
 }
 
 /* =====================================================
-   🎛 OVERLAY BUTTONS (inkl. Admin)
+   🎛 OVERLAY BUTTONS
 ===================================================== */
 
 function createOverlay() {
   if (document.querySelector(".control-overlay")) return;
-
   const overlay = document.createElement("div");
   overlay.className = "control-overlay";
   overlay.innerHTML = `
@@ -282,7 +280,6 @@ function createOverlay() {
     <button class="overlay-btn" title="Vollbild" onclick="toggleFullscreen()">🖥️</button>
     <button class="overlay-btn" title="Ansicht wechseln" onclick="toggleView()">👓</button>
   `;
-
   if (isAdmin) {
     const adminBtn = document.createElement("button");
     adminBtn.className = "overlay-btn";
@@ -291,7 +288,6 @@ function createOverlay() {
     adminBtn.onclick = openAdminPanel;
     overlay.appendChild(adminBtn);
   }
-
   document.querySelector(".status-bar").appendChild(overlay);
   setupOverlayHide(overlay);
 }
@@ -308,7 +304,7 @@ function setupOverlayHide(overlay) {
 }
 
 /* =====================================================
-   📊 FPS & PING
+   FPS / PING
 ===================================================== */
 
 async function monitorPing(pc) {
@@ -353,33 +349,17 @@ function updateHud(text, isFps = false) {
     pingValue = parseFloat(text.match(/\d+(\.\d+)?/));
   }
   hud.textContent = `${hudPing} | ${hudFps}`;
-  updateHudColor();
-}
-
-function updateHudColor() {
-  hud.classList.remove("ping-low", "ping-mid", "ping-high", "fps-high", "fps-low");
-  if (pingValue < 60) hud.classList.add("ping-low");
-  else if (pingValue < 120) hud.classList.add("ping-mid");
-  else hud.classList.add("ping-high");
-
-  if (fpsValue > 40) hud.classList.add("fps-high");
-  else hud.classList.add("fps-low");
 }
 
 /* =====================================================
-   🖥️ STEUERUNG
+   VIEW / VR
 ===================================================== */
 
 function toggleFullscreen() {
   if (video.requestFullscreen) video.requestFullscreen();
   else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
 }
-
 function restartStream() { location.reload(); }
-
-/* =====================================================
-   👓 VR
-===================================================== */
 
 function toggleView() {
   vrMode = !vrMode;
@@ -424,7 +404,7 @@ function toggleView() {
 }
 
 /* =====================================================
-   👁️ PASSWORT TOGGLES
+   👁️ PASSWORT-TOGGLE
 ===================================================== */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -448,11 +428,22 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 /* =====================================================
+   🟩 UI FEEDBACK
+===================================================== */
+
+function showFeedback(message, type = "success") {
+  const box = document.getElementById("ui-feedback");
+  if (!box) return;
+  box.textContent = message;
+  box.className = `ui-feedback show ${type}`;
+  setTimeout(() => { box.className = "ui-feedback"; }, 3000);
+}
+
+/* =====================================================
    🔴 BEWEGUNGSERKENNUNG & 🌈 NEON
 ===================================================== */
 
 let motionActive = false;
-
 async function checkMotion() {
   try {
     const res = await fetch("/motion");
