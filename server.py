@@ -190,6 +190,32 @@ def delete_user(user_id: int) -> bool:
     conn.close()
     return deleted
 
+def update_user(user_id: int, new_username: Optional[str], new_password: Optional[str]) -> (bool, str):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return False, "not_found"
+    if row[0] == 1:
+        conn.close()
+        return False, "admin_locked"
+
+    if new_username:
+        if username_exists(new_username):
+            conn.close()
+            return False, "name_exists"
+        enc = fernet.encrypt(new_username.encode()).decode()
+        c.execute("UPDATE users SET username = ? WHERE id = ?", (enc, user_id))
+
+    if new_password:
+        c.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_pw(new_password), user_id))
+
+    conn.commit()
+    conn.close()
+    return True, "ok"
+
 # ======================================================
 # 🔑 JWT (TOKEN AUTHENTIFIZIERUNG)
 # ======================================================
@@ -287,7 +313,49 @@ async def javascript(request: web.Request) -> web.Response:
 
 async def dashboard(request: web.Request) -> web.Response:
     return web.FileResponse("templates/dashboard.html")
+# ======================================================
+# 👑 ADMIN-ENDPUNKTE
+# ======================================================
 
+async def admin_users(request: web.Request) -> web.Response:
+    auth_data = require_auth(request, admin_required=True)
+    if not auth_data:
+        return web.Response(status=401, text="Unauthorized")
+    try:
+        users = get_all_users()
+        return web.json_response(users)
+    except Exception:
+        print("💥 Fehler bei /admin/users:\n" + traceback.format_exc())
+        return web.Response(status=500, text="Server error")
+
+async def admin_delete(request: web.Request) -> web.Response:
+    if not require_auth(request, admin_required=True):
+        return web.Response(status=401, text="Unauthorized")
+    data = await request.json()
+    user_id = data.get("id")
+    if user_id is None:
+        return web.Response(status=400, text="Invalid request")
+    if delete_user(int(user_id)):
+        return web.Response(status=200, text="User deleted")
+    return web.Response(status=404, text="User not found or admin")
+
+async def admin_update(request: web.Request) -> web.Response:
+    if not require_auth(request, admin_required=True):
+        return web.Response(status=401, text="Unauthorized")
+    data = await request.json()
+    user_id = data.get("id")
+    new_name = (data.get("username") or "").strip()
+    new_pass = (data.get("password") or "").strip()
+    if user_id is None or (not new_name and not new_pass):
+        return web.Response(status=400, text="Invalid request")
+    ok, reason = update_user(int(user_id), new_name if new_name else None, new_pass if new_pass else None)
+    if ok:
+        return web.Response(status=200, text="Updated")
+    if reason == "admin_locked":
+        return web.Response(status=403, text="Admin locked")
+    if reason == "name_exists":
+        return web.Response(status=409, text="Name exists")
+    return web.Response(status=404, text="User not found")
 # ======================================================
 # 🧹 SERVER-SHUTDOWN
 # ======================================================
@@ -314,6 +382,9 @@ def create_app() -> web.Application:
     app.router.add_post("/register", register)
     app.router.add_post("/offer", offer)
     app.router.add_static("/static/", path="static", name="static")
+    app.router.add_get("/admin/users", admin_users)
+    app.router.add_post("/admin/delete", admin_delete)
+    app.router.add_post("/admin/update", admin_update)
     app.on_shutdown.append(on_shutdown)
     return app
 
