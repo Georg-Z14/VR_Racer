@@ -425,4 +425,4 @@ def create_app() -> web.Application:
 
 if __name__ == "__main__":
     print("🚀 Starte VR-Racer Backend...")
-    web.run_app(create_app(), host="192.168.178.135", port=8080)
+    web.run_app(create_app(), host="0.0.0.0", port=8080)
