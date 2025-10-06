@@ -1,40 +1,48 @@
-import asyncio
-import json
-import sqlite3
-import hashlib
-import os
-import jwt
-import datetime
-import traceback
-from typing import List, Dict, Optional
-from aiohttp import web
-from aiortc import RTCPeerConnection, RTCSessionDescription
-from aiortc.contrib.media import MediaRelay
-from camera_stream import MotionCameraStream
-from cryptography.fernet import Fernet
-from dotenv import load_dotenv
+# ======================================================
+# 📦 IMPORTS – Alle benötigten Module
+# ======================================================
+import asyncio                          # Für asynchrone Operationen (gleichzeitige Abläufe, z. B. Server + Kamera)
+import json                             # Zum Verarbeiten von JSON-Daten (API-Kommunikation)
+import sqlite3                          # Lokale Datenbank (Benutzerverwaltung)
+import hashlib                          # Zum Hashen von Passwörtern (sichere Speicherung)
+import os                               # Zugriff auf Umgebungsvariablen und Dateisystem
+import jwt                              # Für JSON Web Tokens (Authentifizierung)
+import datetime                         # Für Ablaufzeiten von Tokens
+import traceback                        # Fehlerausgabe mit vollständigem Stacktrace
+from typing import List, Dict, Optional # Typ-Hinweise für bessere Lesbarkeit und IDE-Unterstützung
+from aiohttp import web                 # Asynchroner Webserver (HTTP + WebSocket)
+from aiortc import RTCPeerConnection, RTCSessionDescription # Für WebRTC-Verbindungen (Peer-to-Peer)
+from aiortc.contrib.media import MediaRelay                 # Teilt denselben Videostream mit mehreren Clients
+from camera_stream import MotionCameraStream                # Eigene Kamera-Klasse (Bewegungserkennung + Stream)
+from cryptography.fernet import Fernet                      # Symmetrische Verschlüsselung (für Benutzernamen)
+from dotenv import load_dotenv                              # Lädt .env-Dateien (z. B. Secrets)
 
 # ======================================================
-# ⚙️ BASIS
+# ⚙️ BASISKONFIGURATION
 # ======================================================
 
-load_dotenv()  # .env laden
-pcs = set()
-relay = MediaRelay()
+load_dotenv()  # Liest Werte aus .env-Datei in Umgebungsvariablen (z. B. JWT_SECRET)
+
+pcs = set()  # Menge aktiver WebRTC-Verbindungen (PeerConnections)
+relay = MediaRelay()  # Sorgt dafür, dass mehrere Clients denselben Videostream empfangen können
+
+# Kamera wird beim Start direkt initialisiert (Auflösung 1280x720)
 camera = MotionCameraStream(camera_index=0, target_size=(1280, 720))
 
-DB_PATH = "users.db"
-KEY_FILE = "secret.key"
+DB_PATH = "users.db"     # Pfad zur SQLite-Datenbankdatei
+KEY_FILE = "secret.key"  # Datei mit Fernet-Schlüssel (zur Verschlüsselung der Benutzernamen)
 
-# ✅ JWT nur aus .env (ohne Defaults im Code)
-JWT_SECRET = os.getenv("JWT_SECRET")
-JWT_EXPIRE_MINUTES_STR = os.getenv("JWT_EXPIRE_MINUTES")
+# JWT-Konfiguration aus Umgebungsvariablen
+JWT_SECRET = os.getenv("JWT_SECRET")                  # Geheimer Schlüssel zur Signierung der Tokens
+JWT_EXPIRE_MINUTES_STR = os.getenv("JWT_EXPIRE_MINUTES")  # Ablaufzeit in Minuten (als String)
 
+# Sicherheitsprüfung – ohne diese Werte kein sicherer Betrieb
 if not JWT_SECRET:
     raise RuntimeError("❌ Kein JWT_SECRET in .env gefunden! Bitte setzen.")
 if not JWT_EXPIRE_MINUTES_STR:
     raise RuntimeError("❌ Keine Ablaufzeit (JWT_EXPIRE_MINUTES) in .env gefunden! Bitte setzen.")
 
+# Ablaufzeit in Integer umwandeln
 try:
     JWT_EXPIRE_MINUTES = int(JWT_EXPIRE_MINUTES_STR)
 except ValueError:
@@ -44,35 +52,44 @@ except ValueError:
 # 🔐 HASH & VERSCHLÜSSELUNG
 # ======================================================
 
+# Wandelt ein Passwort in einen SHA256-Hash um (keine Klartextspeicherung)
 def hash_pw(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
+# Lädt oder erstellt den Fernet-Schlüssel (für verschlüsselte Benutzernamen)
 def load_key() -> bytes:
     try:
+        # Prüft, ob Schlüsseldatei existiert
         with open(KEY_FILE, "rb") as f:
-            return f.read()
+            return f.read()  # Existierender Schlüssel wird geladen
     except FileNotFoundError:
+        # Neuer Schlüssel wird generiert und gespeichert
         key = Fernet.generate_key()
         with open(KEY_FILE, "wb") as f:
             f.write(key)
         print("🔐 Neuer Encryption-Key erzeugt:", KEY_FILE)
         return key
 
+# Fernet-Instanz erstellen (für symmetrische Verschlüsselung)
 fernet = Fernet(load_key())
 
 # ======================================================
 # 🗄️ DATENBANK
 # ======================================================
 
+# Prüft, ob die Spalte "is_admin" existiert, und fügt sie bei Bedarf hinzu
 def ensure_is_admin_column(c: sqlite3.Cursor):
     try:
         c.execute("SELECT is_admin FROM users LIMIT 1")
     except sqlite3.OperationalError:
         c.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
 
+# Initialisiert Datenbank und legt ggf. Standard-Admins an
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    conn = sqlite3.connect(DB_PATH)  # Verbindung zur SQLite-Datenbank herstellen
+    c = conn.cursor()  # Cursor zum Ausführen von SQL-Befehlen
+
+    # Tabelle "users" anlegen, falls sie noch nicht existiert
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,37 +99,39 @@ def init_db():
         )
     """)
     conn.commit()
-    ensure_is_admin_column(c)
+    ensure_is_admin_column(c)  # Sicherstellen, dass Spalte is_admin vorhanden ist
     conn.commit()
 
+    # Admins aus Umgebungsvariablen laden
     admins = {
         "Admin_G": os.getenv("ADMIN_G_PASS"),
         "Admin_D": os.getenv("ADMIN_D_PASS")
     }
 
+    # Prüfen, ob Admins schon existieren, ansonsten hinzufügen
     for name, pw in admins.items():
         if not pw:
-            print(f"⚠️ Kein Passwort in .env für {name} – übersprungen.")
-            continue
+            continue  # Wenn kein Passwort gesetzt → überspringen
 
         c.execute("SELECT username FROM users")
         rows = c.fetchall()
         exists = False
         for (enc,) in rows:
             try:
+                # Entschlüsselt gespeicherten Benutzernamen und vergleicht ihn
                 if fernet.decrypt(enc.encode()).decode() == name:
                     exists = True
                     break
             except Exception:
                 continue
 
+        # Falls Admin nicht existiert → neuen Eintrag erstellen
         if not exists:
-            enc_user = fernet.encrypt(name.encode()).decode()
+            enc_user = fernet.encrypt(name.encode()).decode()  # Benutzername verschlüsseln
             c.execute(
                 "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, 1)",
                 (enc_user, hash_pw(pw)),
             )
-            print(f"👑 Admin hinzugefügt: {name}")
 
     conn.commit()
     conn.close()
@@ -122,6 +141,7 @@ def init_db():
 # 👥 BENUTZERFUNKTIONEN
 # ======================================================
 
+# Prüft, ob Benutzername (nach Entschlüsselung) bereits existiert
 def username_exists(username: str) -> bool:
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -136,25 +156,26 @@ def username_exists(username: str) -> bool:
             pass
     return False
 
+# Erstellt neuen Benutzer (nicht-Admin)
 def create_user(username: str, password: str) -> bool:
-    if username_exists(username):
+    if username_exists(username):  # Doppelte Benutzernamen vermeiden
         return False
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     try:
-        enc = fernet.encrypt(username.encode()).decode()
+        enc = fernet.encrypt(username.encode()).decode()  # Benutzername verschlüsseln
         c.execute(
             "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, 0)",
             (enc, hash_pw(password)),
         )
         conn.commit()
-        print(f"✅ Benutzer erstellt: {username}")
         return True
     except sqlite3.IntegrityError:
         return False
     finally:
         conn.close()
 
+# Prüft Login (vergleicht Benutzername + Passwort)
 def check_user(username: str, password: str) -> Dict[str, bool]:
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -163,12 +184,14 @@ def check_user(username: str, password: str) -> Dict[str, bool]:
     conn.close()
     for enc_name, pw_hash, is_admin in rows:
         try:
+            # Benutzername entschlüsseln und vergleichen
             if fernet.decrypt(enc_name.encode()).decode() == username and pw_hash == hash_pw(password):
                 return {"ok": True, "admin": bool(is_admin)}
         except Exception:
             continue
     return {"ok": False, "admin": False}
 
+# Gibt alle Benutzer zurück (mit Entschlüsselung)
 def get_all_users() -> List[Dict]:
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -184,6 +207,7 @@ def get_all_users() -> List[Dict]:
         users.append({"id": uid, "username": name, "is_admin": bool(is_admin)})
     return users
 
+# Löscht Benutzer (Admins ausgeschlossen)
 def delete_user(user_id: int) -> bool:
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -193,6 +217,7 @@ def delete_user(user_id: int) -> bool:
     conn.close()
     return deleted
 
+# Aktualisiert Benutzer (Name/Passwort)
 def update_user(user_id: int, new_username: Optional[str], new_password: Optional[str]) -> (bool, str):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -220,29 +245,26 @@ def update_user(user_id: int, new_username: Optional[str], new_password: Optiona
     return True, "ok"
 
 # ======================================================
-# 🔑 JWT-HILFSFUNKTIONEN
+# 🔑 JWT (TOKEN AUTHENTIFIZIERUNG)
 # ======================================================
 
+# Erstellt Token mit Benutzername, Adminstatus und Ablaufzeit
 def create_token(username: str, is_admin: bool) -> str:
     exp = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=JWT_EXPIRE_MINUTES)
-    payload = {
-        "user": username,
-        "is_admin": is_admin,
-        "exp": exp
-    }
+    payload = {"user": username, "is_admin": is_admin, "exp": exp}
     token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
     if isinstance(token, bytes):
         token = token.decode("utf-8")
     return token
 
+# Dekodiert Token (Prüft Signatur + Ablaufzeit)
 def decode_token(token: str):
     try:
         return jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidTokenError:
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         return None
 
+# Prüft, ob Request gültiges Token enthält (optional nur für Admins)
 def require_auth(request: web.Request, admin_required: bool = False):
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
@@ -256,26 +278,24 @@ def require_auth(request: web.Request, admin_required: bool = False):
     return data
 
 # ======================================================
-# 🌐 API
+# 🌐 API-ENDPUNKTE (REST)
 # ======================================================
 
+# Login-Endpunkt (Benutzer authentifizieren)
 async def login(request: web.Request) -> web.Response:
     data = await request.json()
     username = data.get("username", "")
     password = data.get("password", "")
     result = check_user(username, password)
-
     if result["ok"]:
         token = create_token(username, result["admin"])
-        print(("👑 Admin" if result["admin"] else "✅ Benutzer"), f"angemeldet: {username}")
         return web.json_response({
             "token": token,
             "expires_in": JWT_EXPIRE_MINUTES * 60
         }, status=202 if result["admin"] else 200)
-
-    print(f"❌ Login fehlgeschlagen: {username}")
     return web.Response(status=403, text="Wrong credentials")
 
+# Registrierung neuer Benutzer
 async def register(request: web.Request) -> web.Response:
     data = await request.json()
     username = data.get("username", "")
@@ -286,6 +306,7 @@ async def register(request: web.Request) -> web.Response:
         return web.Response(status=200, text="User created")
     return web.Response(status=500, text="Error creating user")
 
+# WebRTC-Offer-Verarbeitung (Verbindung vom Browser)
 async def offer(request: web.Request) -> web.Response:
     user = require_auth(request)
     if not user:
@@ -308,7 +329,6 @@ async def offer(request: web.Request) -> web.Response:
         pc.addTrack(track)
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
-        print(f"📡 Stream gestartet für {user['user']} ({'Admin' if user['is_admin'] else 'User'})")
         return web.json_response({
             "sdp": pc.localDescription.sdp,
             "type": pc.localDescription.type
@@ -317,18 +337,19 @@ async def offer(request: web.Request) -> web.Response:
         print("💥 [offer] Fehler:\n" + traceback.format_exc())
         return web.Response(status=500, text="Offer error")
 
+# Bewegungsstatus-Endpunkt
 async def motion_status(request: web.Request) -> web.Response:
     if not require_auth(request):
         return web.Response(status=401, text="Unauthorized")
     return web.json_response({"motion": bool(camera.motion_detected)})
 
+# Admin-Endpunkte
 async def admin_users(request: web.Request) -> web.Response:
     auth_data = require_auth(request, admin_required=True)
     if not auth_data:
         return web.Response(status=401, text="Unauthorized")
     try:
         users = get_all_users()
-        print(f"👑 Admin '{auth_data['user']}' hat {len(users)} Benutzer abgerufen.")
         return web.json_response(users)
     except Exception:
         print("💥 Fehler bei /admin/users:\n" + traceback.format_exc())
@@ -348,15 +369,12 @@ async def admin_delete(request: web.Request) -> web.Response:
 async def admin_update(request: web.Request) -> web.Response:
     if not require_auth(request, admin_required=True):
         return web.Response(status=401, text="Unauthorized")
-
     data = await request.json()
     user_id = data.get("id")
     new_name = (data.get("username") or "").strip()
     new_pass = (data.get("password") or "").strip()
-
     if user_id is None or (not new_name and not new_pass):
         return web.Response(status=400, text="Invalid request")
-
     ok, reason = update_user(int(user_id), new_name if new_name else None, new_pass if new_pass else None)
     if ok:
         return web.Response(status=200, text="Updated")
@@ -367,9 +385,8 @@ async def admin_update(request: web.Request) -> web.Response:
     return web.Response(status=404, text="User not found")
 
 # ======================================================
-# 🔧 FRONTEND
+# 🔧 FRONTEND ROUTEN
 # ======================================================
-
 async def index(request: web.Request) -> web.Response:
     return web.FileResponse("templates/index1.html")
 
@@ -377,9 +394,8 @@ async def javascript(request: web.Request) -> web.Response:
     return web.FileResponse("static/js/client1.js")
 
 # ======================================================
-# 🧹 SHUTDOWN
+# 🧹 SERVER-SHUTDOWN
 # ======================================================
-
 async def on_shutdown(app: web.Application):
     camera.stop()
     for pc in list(pcs):
@@ -389,9 +405,8 @@ async def on_shutdown(app: web.Application):
     print("🛑 Server beendet.")
 
 # ======================================================
-# 🚀 START
+# 🚀 SERVER-START
 # ======================================================
-
 def create_app() -> web.Application:
     init_db()
     app = web.Application()

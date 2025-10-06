@@ -1,16 +1,25 @@
 #!/bin/zsh
 set -euo pipefail
+# → Skript bricht bei Fehlern ab (-e)
+# → Unbenutzte Variablen werden als Fehler behandelt (-u)
+# → Fehler in Pipes werden weitergegeben (-o pipefail)
 
-# === Konfiguration ===
-ENV_GPG=".env.gpg"
-SERVER_SCRIPT="server.py"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
-CACHE_DIR="/tmp/vr_env_cache"
-PASSFILE="$CACHE_DIR/.pass"
-ENV_RAM="$CACHE_DIR/.env"
-CACHE_TTL=${CACHE_TTL:-60}
+# ======================================================
+# ⚙️ KONFIGURATION
+# ======================================================
+ENV_GPG=".env.gpg"           # verschlüsselte .env-Datei
+SERVER_SCRIPT="server.py"    # Python-Server, der gestartet werden soll
+PYTHON_BIN="${PYTHON_BIN:-python3}"   # Python-Interpreter
+CACHE_DIR="/tmp/vr_env_cache"         # temporäres Verzeichnis im RAM
+PASSFILE="$CACHE_DIR/.pass"           # Datei für zwischengespeichertes Passwort
+ENV_RAM="$CACHE_DIR/.env"             # entschlüsselte .env (wird nach TTL gelöscht)
+CACHE_TTL=${CACHE_TTL:-60}            # wie lange das Passwort zwischengespeichert bleibt (Sekunden)
 
-# === Funktionen ===
+# ======================================================
+# 🧹 CLEANUP-FUNKTIONEN
+# ======================================================
+
+# → Löscht nur Cache & temporäre Dateien
 cleanup_cache() {
   echo "🧹 Lösche Cache-Dateien..."
   rm -f "$PASSFILE" "$ENV_RAM" 2>/dev/null || true
@@ -18,6 +27,7 @@ cleanup_cache() {
   echo "✅ Cache & RAM-Daten entfernt."
 }
 
+# → Wird beim Beenden (CTRL+C oder Serverende) aufgerufen
 cleanup_all() {
   echo "🧹 Cleanup nach Script-Ende..."
   if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -27,28 +37,35 @@ cleanup_all() {
   echo "✅ Server gestoppt."
 }
 
+# Trap = bei EXIT (also auch STRG+C) wird cleanup_all() aufgerufen
 trap cleanup_all EXIT
 
-# === Prüfung ===
+# ======================================================
+# 🧩 GRUNDPRÜFUNG
+# ======================================================
 if [[ ! -f "$ENV_GPG" ]]; then
   echo "❌ $ENV_GPG nicht gefunden. Abbruch."
   exit 1
 fi
 
 mkdir -p "$CACHE_DIR"
-chmod 700 "$CACHE_DIR"
+chmod 700 "$CACHE_DIR"  # nur Besitzer darf lesen/schreiben
 
-# === Cache prüfen ===
+# ======================================================
+# 🔁 CACHE-PRÜFUNG
+# ======================================================
 if [[ -f "$PASSFILE" ]]; then
-  # Prüfe, ob Cache jünger als TTL ist → macOS & Linux kompatibel
+  # macOS & Linux verwenden unterschiedliche stat-Befehle
   if [[ "$OSTYPE" == "darwin"* ]]; then
     LAST_MOD=$(stat -f %m "$PASSFILE")     # macOS
   else
-    LAST_MOD=$(stat -c %Y "$PASSFILE")     # Linux
+    LAST_MOD=$(stat -c %Y "$PASSFILE")     # Linux / Raspberry Pi
   fi
 
   NOW=$(date +%s)
   AGE=$((NOW - LAST_MOD))
+
+  # Cache gültig?
   if (( AGE < CACHE_TTL )); then
     echo "🔁 Verwende gespeicherte Passphrase (Cache gültig, noch $((CACHE_TTL - AGE)) s)."
   else
@@ -57,19 +74,24 @@ if [[ -f "$PASSFILE" ]]; then
   fi
 fi
 
-# === Passwort ggf. neu eingeben ===
+# ======================================================
+# 🔑 PASSWORT-EINGABE
+# ======================================================
 if [[ ! -f "$PASSFILE" ]]; then
-  echo -n "🔑 Bitte GPG-Passphrase eingeben: "
-  stty -echo
-  read -r PASSPHRASE
+  echo -n "🔑 Bitte GPG-Passphrase eingeben (wird im Cache gespeichert): "
+  stty -echo         # verhindert, dass das Passwort im Terminal sichtbar ist
+  read -r PASSPHRASE # Eingabe lesen
   stty echo
   echo
   printf "%s" "$PASSPHRASE" > "$PASSFILE"
-  chmod 600 "$PASSFILE"
-  unset PASSPHRASE
+  chmod 600 "$PASSFILE"    # nur Besitzer darf lesen
+  unset PASSPHRASE         # Passwort sofort aus Speicher löschen
 fi
 
-# === Entschlüsseln in RAM ===
+# ======================================================
+# 🔓 ENTSCHLÜSSELN .ENV → RAM
+# ======================================================
+echo "🧩 Entschlüssele .env.gpg temporär..."
 if ! gpg --batch --yes --quiet --pinentry-mode loopback \
   --passphrase-file "$PASSFILE" -o "$ENV_RAM" -d "$ENV_GPG"; then
   echo "❌ Entschlüsselung fehlgeschlagen."
@@ -78,11 +100,15 @@ if ! gpg --batch --yes --quiet --pinentry-mode loopback \
 fi
 chmod 600 "$ENV_RAM"
 
-# === ENV laden ===
+# ======================================================
+# 🌍 ENV LADEN
+# ======================================================
+echo "📦 Lade Umgebungsvariablen..."
+# Jede Zeile der .env-Datei exportieren (z. B. JWT_SECRET, DB_PATH)
 set -o allexport
 while IFS= read -r line || [[ -n "$line" ]]; do
-  [[ -z "$line" ]] && continue
-  [[ "$line" == \#* ]] && continue
+  [[ -z "$line" ]] && continue         # leere Zeilen ignorieren
+  [[ "$line" == \#* ]] && continue     # Kommentare ignorieren
   key="${line%%=*}"
   value="${line#*=}"
   value="${value#\"}"
@@ -91,20 +117,32 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 done < "$ENV_RAM"
 set +o allexport
 
-# === Server starten ===
+# ======================================================
+# 🚀 SERVER STARTEN
+# ======================================================
 echo "🚀 Starte Server..."
-$PYTHON_BIN "$SERVER_SCRIPT" &
+
+LOGFILE="$(pwd)/server.log"  # Log-Datei im Projektverzeichnis
+$PYTHON_BIN "$SERVER_SCRIPT" > "$LOGFILE" 2>&1 &  # Server im Hintergrund starten
 SERVER_PID=$!
 
-# === Autolöschung nach Ablauf ===
+echo "✅ Server läuft (PID: $SERVER_PID)"
+echo "📄 Logs: $LOGFILE"
+echo "🕒 Cache bleibt aktiv für $CACHE_TTL Sekunden"
+
+# ======================================================
+# 🧨 AUTO-LÖSCHUNG NACH ABLAUF
+# ======================================================
 (
+  # Timer im Hintergrund → nach Ablauf der Zeit werden Pass & .env gelöscht
   sleep "$CACHE_TTL"
   echo
   echo "⏱️ Cache-TTL ($CACHE_TTL s) abgelaufen — lösche alles sicher."
   cleanup_cache
 ) &
 
-# === Warten bis Server stoppt ===
-wait "$SERVER_PID"
-
+# ======================================================
+# ⏳ SERVER-LAUFZEIT
+# ======================================================
+wait "$SERVER_PID"  # wartet, bis Python-Server stoppt
 echo "🛑 Server beendet."

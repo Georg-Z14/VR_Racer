@@ -5,7 +5,16 @@
   <title>VR-Racer Live</title>
   <link rel="stylesheet" href="../static/css/style.css">
 </head>
-<body>
+<body class="login-active" onload="if(localStorage.getItem('jwt_token') && Date.now() < parseInt(localStorage.getItem('jwt_expiry') || 0)) {
+        document.getElementById('login-bg-video')?.remove();
+        document.body.classList.remove('login-active');
+      }">  <!-- Start im Login-Zustand -->
+
+<!-- 🔥 Hintergrundvideo nur im Loginbereich -->
+<video id="login-bg-video" autoplay muted loop playsinline>
+  <source src="../static/media/vr_race_loop.mp4" type="video/mp4">
+</video>
+
 
 <header>
   <img src="../static/logo.png" alt="VR-Racer Logo" class="logo">

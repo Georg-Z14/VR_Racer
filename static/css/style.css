@@ -9,6 +9,28 @@
 /* ======================================================
    GRUNDLAYOUT
 ====================================================== */
+/* 🔥 Hintergrundvideo nur im Login-Bereich */
+#login-bg-video {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: -2;
+  opacity: 0.5;
+  transition: opacity 0.8s ease;
+}
+
+/* Wenn Stream aktiv ist → kein Video */
+body:not(.login-active) #login-bg-video {
+  display: none;
+}
+
+/* Gitter-Hintergrund deaktivieren im Login */
+body.login-active::before {
+  display: none !important;
+}
+
 body {
   font-family: "Segoe UI", Roboto, sans-serif;
   background: #000;
@@ -497,4 +519,28 @@ footer {
   box-shadow:
     0 0 25px var(--secondary),
     0 0 40px rgba(255, 0, 150, 0.3);
+}
+
+/* ---------- 🎬 Login Hintergrundvideo ---------- */
+#login-bg-video {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
+  z-index: -1;
+  opacity: 0.35;
+  filter: blur(6px) saturate(1.2) brightness(0.8);
+  transition: opacity 0.6s ease;
+}
+
+/* Wenn man Stream oder Register anzeigt → Video ausblenden */
+#register-card[style*="display: block"],
+#stream-card[style*="display: block"] ~ #login-bg-video {
+  opacity: 0;
+}
+
+#vr-sbs-wrap video {
+  backface-visibility: hidden;
+  will-change: transform;
 }

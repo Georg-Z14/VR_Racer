@@ -1,74 +1,94 @@
-let authPassword = null;
-let vrMode = false;
-let overlayTimeout;
-let currentStream = null;
-let pc;
-let isAdmin = false;
-let token = null;
-let tokenExpiry = null;
-let tokenTimer = null;
-let hudTimer = "⏰ --:--";
+// Globale Variablen für Authentifizierung, VR-Modus und Streaming
+let authPassword = null;      // Wird aktuell nicht genutzt, Platzhalter für künftige Authentifizierung
+let vrMode = false;           // Gibt an, ob der VR-Modus aktiv ist
+let overlayTimeout;           // Timeout für Overlay-Anzeigen
+let currentStream = null;     // Aktueller Video-Stream (WebRTC)
+let pc;                       // RTCPeerConnection-Objekt (WebRTC-Verbindung)
+let isAdmin = false;          // Benutzerrolle (Admin oder normaler Nutzer)
+let token = null;             // JWT-Token für Login-Sitzung
+let tokenExpiry = null;       // Zeitpunkt, wann der Token abläuft
+let tokenTimer = null;        // Timer für automatischen Logout bei Ablauf
+
+// HUD-Werte (werden später im Stream angezeigt)
+let hudTimer = "⏰ --:--";     // Zeigt verbleibende Login-Zeit
+let hudPing = "📡 -- ms";      // Netzwerkverzögerung
+let hudFps  = "🎥 -- FPS";     // Frames pro Sekunde
 
 /* =====================================================
    🔑 LOGIN / REGISTRIERUNG (JWT)
 ===================================================== */
 
+// Login-Funktion – meldet Benutzer am Server an
 async function login() {
+  // Eingaben abrufen
   const username = document.getElementById("username").value.trim();
   const password = document.getElementById("password").value.trim();
   const card = document.getElementById("login-card");
   const status = document.getElementById("login-status");
 
+  // Vorherige Statusanzeigen zurücksetzen
   card.classList.remove("success", "error");
   status.textContent = "";
 
   try {
+    // Login-Anfrage an Server schicken
     const res = await fetch("/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password })
     });
 
-    const data = await res.text();
+    const data = await res.text(); // Antwort lesen
 
+    // Erfolgreicher Login (200 = User, 202 = Admin)
     if (res.status === 200 || res.status === 202) {
       const json = JSON.parse(data);
-      token = json.token;
-      tokenExpiry = Date.now() + json.expires_in * 1000; // vom Server
-      isAdmin = (res.status === 202);
+      token = json.token;                               // JWT speichern
+      tokenExpiry = Date.now() + json.expires_in * 1000; // Ablaufzeit berechnen
+      isAdmin = (res.status === 202);                    // Admin-Flag
 
-      // Persistieren bis Ablauf
+      // Token lokal im Browser speichern
       localStorage.setItem("jwt_token", token);
       localStorage.setItem("jwt_expiry", String(tokenExpiry));
       localStorage.setItem("is_admin", String(isAdmin));
 
+      // Visuelles Feedback
       card.classList.add("success");
       status.textContent = isAdmin ? "👑 Admin-Login erfolgreich!" : "✅ Login erfolgreich!";
       showFeedback(status.textContent, "success");
 
+      // Token-Ablauf-Überwachung starten
       scheduleTokenExpiryLogout();
 
+      // Nach kurzer Zeit zum Stream wechseln
       setTimeout(() => {
         card.style.display = "none";
         document.getElementById("stream-card").style.display = "block";
-        start();
+        hideLoginVideo(); // <— Hintergrundvideo ausblenden
+        start(); // Verbindung aufbauen
       }, 600);
-    } else if (res.status === 403) {
+    }
+    // Login-Daten falsch
+    else if (res.status === 403) {
       card.classList.add("error");
       status.textContent = "❌ Benutzername oder Passwort falsch!";
       showFeedback("❌ Benutzername oder Passwort falsch!", "error");
-    } else {
+    }
+    // Sonstiger Fehler
+    else {
       card.classList.add("error");
       status.textContent = "⚠️ Unbekannter Fehler beim Login!";
       showFeedback("⚠️ Unbekannter Fehler beim Login!", "error");
     }
   } catch {
+    // Keine Verbindung zum Server
     card.classList.add("error");
     status.textContent = "⚠️ Server nicht erreichbar!";
     showFeedback("⚠️ Server nicht erreichbar!", "error");
   }
 }
 
+// Registrierung eines neuen Benutzers
 async function registerUser() {
   const username = document.getElementById("new-username").value.trim();
   const password = document.getElementById("new-password").value.trim();
@@ -78,6 +98,7 @@ async function registerUser() {
   card.classList.remove("success", "error");
   status.textContent = "";
 
+  // Eingaben prüfen
   if (!username || !password) {
     card.classList.add("error");
     status.textContent = "⚠️ Bitte alle Felder ausfüllen!";
@@ -86,33 +107,41 @@ async function registerUser() {
   }
 
   try {
+    // Registrierung an Server senden
     const res = await fetch("/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password })
     });
 
+    // Erfolgreich
     if (res.status === 200) {
       card.classList.add("success");
       status.textContent = "✅ Benutzer erfolgreich angelegt!";
       showFeedback("✅ Benutzer erfolgreich angelegt!", "success");
       setTimeout(() => switchToLogin(), 900);
-    } else if (res.status === 409) {
+    }
+    // Benutzername existiert schon
+    else if (res.status === 409) {
       card.classList.add("error");
       status.textContent = "❌ Benutzername bereits vergeben!";
       showFeedback("❌ Benutzername bereits vergeben!", "error");
-    } else {
+    }
+    // Allgemeiner Fehler
+    else {
       card.classList.add("error");
       status.textContent = "⚠️ Fehler bei der Registrierung!";
       showFeedback("⚠️ Fehler bei der Registrierung!", "error");
     }
   } catch {
+    // Server nicht erreichbar
     card.classList.add("error");
     status.textContent = "⚠️ Server nicht erreichbar!";
     showFeedback("⚠️ Server nicht erreichbar!", "error");
   }
 }
 
+// Ansicht zwischen Login und Registrierung wechseln
 function switchToRegister() {
   document.getElementById("login-card").style.display = "none";
   document.getElementById("register-card").style.display = "block";
@@ -126,6 +155,7 @@ function switchToLogin() {
    👁️ PASSWORT-TOGGLE + ENTER LOGIN
 ===================================================== */
 
+// Umschalten zwischen „Passwort anzeigen / verbergen“
 function setupPasswordToggles() {
   const pw = document.getElementById("password");
   const toggle = document.getElementById("toggle-password");
@@ -133,14 +163,15 @@ function setupPasswordToggles() {
     toggle.addEventListener("click", () => {
       if (pw.type === "password") {
         pw.type = "text";
-        toggle.textContent = "🙈";
+        toggle.textContent = "🙈"; // Symbol für „versteckt“
       } else {
         pw.type = "password";
-        toggle.textContent = "👁️";
+        toggle.textContent = "👁️"; // Symbol für „sichtbar“
       }
     });
   }
 
+  // Für Registrierungspasswort
   const npw = document.getElementById("new-password");
   const ntoggle = document.getElementById("toggle-new-password");
   if (ntoggle && npw) {
@@ -156,6 +187,7 @@ function setupPasswordToggles() {
   }
 }
 
+// „Enter“-Taste löst Login oder Registrierung aus
 function setupEnterShortcuts() {
   const loginInputs = [document.getElementById("username"), document.getElementById("password")];
   loginInputs.forEach(input => {
@@ -186,20 +218,24 @@ function setupEnterShortcuts() {
    👑 ADMIN OVERLAY
 ===================================================== */
 
+// Adminbereich öffnen
 function openAdminPanel() {
   const overlay = document.getElementById("admin-overlay");
   overlay.style.display = "flex";
-  loadAdminPanel();
+  loadAdminPanel(); // Benutzerliste laden
 }
 
+// Adminbereich schließen
 function closeAdminPanel() {
   document.getElementById("admin-overlay").style.display = "none";
 }
 
+// Benutzerliste laden
 async function loadAdminPanel() {
   const container = document.getElementById("admin-list");
   container.innerHTML = "<p>⏳ Lade Benutzer...</p>";
 
+  // Kein Token → kein Zugriff
   if (!token) {
     container.innerHTML = "❌ Kein Token – bitte neu anmelden.";
     return;
@@ -210,6 +246,7 @@ async function loadAdminPanel() {
       headers: { "Authorization": `Bearer ${token}` }
     });
 
+    // Token ungültig / keine Rechte
     if (res.status === 401) {
       container.innerHTML = "⚠️ Sitzung abgelaufen oder keine Admin-Rechte.";
       showFeedback("⚠️ Sitzung abgelaufen – bitte neu anmelden!", "error");
@@ -217,6 +254,7 @@ async function loadAdminPanel() {
       return;
     }
 
+    // Fehlerbehandlung
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
       container.innerHTML = `❌ Fehler (${res.status}): ${msg}`;
@@ -224,6 +262,7 @@ async function loadAdminPanel() {
       return;
     }
 
+    // Benutzerliste anzeigen
     const users = await res.json();
     if (!users || users.length === 0) {
       container.innerHTML = "<p>Keine Benutzer registriert.</p>";
@@ -249,30 +288,32 @@ async function loadAdminPanel() {
     console.error("⚠️ Serverfehler /admin/users:", e);
     container.innerHTML = "⚠️ Serverfehler (Konsole prüfen).";
   }
-}
-
+}// Benutzer aktualisieren (Name/Passwort ändern)
 async function saveUser(id) {
-  const newName = document.getElementById(`user-name-${id}`).value.trim();
-  const newPass = document.getElementById(`user-pass-${id}`).value.trim();
+  const newName = document.getElementById(`user-name-${id}`).value.trim(); // Neuer Benutzername
+  const newPass = document.getElementById(`user-pass-${id}`).value.trim(); // Neues Passwort
 
+  // Wenn nichts geändert wurde → Abbruch
   if (!newName && !newPass) {
     showFeedback("⚠️ Bitte Name oder Passwort ändern!", "error");
     return;
   }
 
   try {
+    // Anfrage an den Server senden
     const res = await fetch("/admin/update", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
+        "Authorization": `Bearer ${token}` // JWT zur Authentifizierung
       },
       body: JSON.stringify({ id, username: newName, password: newPass })
     });
 
+    // Antwort auswerten
     if (res.status === 200) {
       showFeedback("✅ Benutzer aktualisiert!", "success");
-      loadAdminPanel();
+      loadAdminPanel(); // Liste neu laden
     } else if (res.status === 409) {
       showFeedback("❌ Benutzername bereits vergeben!", "error");
     } else if (res.status === 403) {
@@ -281,14 +322,18 @@ async function saveUser(id) {
       showFeedback("❌ Fehler beim Speichern!", "error");
     }
   } catch {
+    // Kein Serverkontakt
     showFeedback("⚠️ Server nicht erreichbar!", "error");
   }
 }
 
+// Benutzer löschen
 async function deleteUser(id) {
+  // Bestätigung abfragen
   if (!confirm("Benutzer wirklich löschen?")) return;
 
   try {
+    // Anfrage an Backend
     const res = await fetch("/admin/delete", {
       method: "POST",
       headers: {
@@ -297,6 +342,7 @@ async function deleteUser(id) {
       },
       body: JSON.stringify({ id })
     });
+    // Erfolg oder Fehler anzeigen
     if (res.ok) {
       showFeedback("✅ Benutzer gelöscht!", "success");
       loadAdminPanel();
@@ -308,6 +354,7 @@ async function deleteUser(id) {
   }
 }
 
+// HTML-Sonderzeichen sicher escapen (Schutz vor XSS)
 function escapeHtml(str) {
   return str.replace(/[&<>"']/g, m => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]
@@ -315,20 +362,22 @@ function escapeHtml(str) {
 }
 
 /* =====================================================
-   TOKEN-EXPIRY HANDLING + COUNTDOWN
+   TOKEN-EXPIRY-HANDLING + COUNTDOWN → HUD Timer
 ===================================================== */
 
+// Logout planen, wenn Token abläuft
 function scheduleTokenExpiryLogout() {
   if (tokenTimer) clearTimeout(tokenTimer);
   const timeLeft = tokenExpiry - Date.now();
   if (timeLeft <= 0) {
-    logoutDueToExpiry();
+    logoutDueToExpiry(); // Falls bereits abgelaufen
     return;
   }
-  startTokenCountdown();
+  startTokenCountdown(); // Countdown starten
   tokenTimer = setTimeout(logoutDueToExpiry, timeLeft);
 }
 
+// Countdown für HUD-Anzeige (zeigt Restzeit)
 function startTokenCountdown() {
   const interval = setInterval(() => {
     if (!tokenExpiry) return clearInterval(interval);
@@ -345,6 +394,7 @@ function startTokenCountdown() {
   }, 1000);
 }
 
+// Automatischer Logout, wenn Token abläuft
 function logoutDueToExpiry() {
   showFeedback("⚠️ Sitzung abgelaufen – bitte neu anmelden!", "error");
   localStorage.removeItem("jwt_token");
@@ -357,49 +407,53 @@ function logoutDueToExpiry() {
 }
 
 /* =====================================================
-   AUTO-LOGIN BEI RELOAD
+   AUTO-LOGIN (Token-basierter Login beim Laden)
 ===================================================== */
 
 document.addEventListener("DOMContentLoaded", () => {
-  setupPasswordToggles();
-  setupEnterShortcuts();
+  setupPasswordToggles();   // Buttons 👁️ aktivieren
+  setupEnterShortcuts();    // Enter-Tasten aktivieren
 
   const savedToken = localStorage.getItem("jwt_token");
   const savedExpiry = localStorage.getItem("jwt_expiry");
   const adminFlag = localStorage.getItem("is_admin");
 
+  // Wenn gültiger Token existiert → Auto-Login
   if (savedToken && savedExpiry && Date.now() < parseInt(savedExpiry)) {
     token = savedToken;
     tokenExpiry = parseInt(savedExpiry);
     isAdmin = (adminFlag === "true");
     scheduleTokenExpiryLogout();
+        // Video sicher entfernen, falls noch da
+    hideLoginVideo(); // 🔥 <—— DAS IST NEU
     document.getElementById("login-card").style.display = "none";
     document.getElementById("stream-card").style.display = "block";
-    start();
+    start(); // Stream starten
   }
 });
 
 /* =====================================================
-   STREAM / HUD / VR / NEON
+   STREAM / HUD / VR-STEUERUNG
 ===================================================== */
 
-const video = document.getElementById("video");
-const statusTxt = document.getElementById("status");
-const hud = document.querySelector(".hud");
+const video = document.getElementById("video");   // Videotag
+const statusTxt = document.getElementById("status"); // Statusanzeige
 
+// Verbindung zu WebRTC-Server aufbauen
 async function start() {
   statusTxt.textContent = "🔄 Verbinde...";
-  pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-  pc.addTransceiver("video", { direction: "recvonly" });
+  pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] }); // Google STUN-Server
+  pc.addTransceiver("video", { direction: "recvonly" }); // Nur Empfang (kein Upload)
 
+  // Wenn Videostream eintrifft
   pc.ontrack = (event) => {
     currentStream = event.streams[0];
     video.srcObject = currentStream;
-    video.classList.add("neon-active");
-    monitorFPS(video);
-    createOverlay();
+    monitorFPS(video);  // FPS-Messung starten
+    createOverlay();    // Steuer-Overlay anzeigen
   };
 
+  // WebRTC-Handshake
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
   const res = await fetch("/offer", {
@@ -419,56 +473,61 @@ async function start() {
   const answer = await res.json();
   await pc.setRemoteDescription(answer);
   statusTxt.textContent = "✅ Verbunden!";
-  monitorPing(pc);
+  monitorPing(pc); // Ping messen
 }
 
+// Overlay mit Buttons (Neu laden, VR etc.)
 function createOverlay() {
-  if (document.querySelector(".control-overlay")) return;
+  if (document.querySelector(".control-overlay")) return; // Nur einmal erzeugen
   const overlay = document.createElement("div");
   overlay.className = "control-overlay";
   overlay.innerHTML = `
     <button class="overlay-btn" title="Neu verbinden" onclick="restartStream()">🔄</button>
     <button class="overlay-btn" title="Vollbild" onclick="toggleFullscreen()">🖥️</button>
-    <button class="overlay-btn" title="Ansicht wechseln" onclick="toggleView()">👓</button>
+    <button class="overlay-btn" title="VR-Modus" onclick="toggleView()">👓</button>
+    ${isAdmin ? `<button class="overlay-btn" title="Benutzerverwaltung" onclick="openAdminPanel()">🛠️</button>` : ""}
   `;
-  if (isAdmin) {
-    const adminBtn = document.createElement("button");
-    adminBtn.className = "overlay-btn";
-    adminBtn.title = "Benutzerverwaltung";
-    adminBtn.textContent = "🛠️";
-    adminBtn.onclick = openAdminPanel;
-    overlay.appendChild(adminBtn);
-  }
   document.querySelector(".status-bar").appendChild(overlay);
-  setupOverlayHide(overlay);
 }
 
-function setupOverlayHide(overlay) {
-  const show = () => {
-    overlay.classList.remove("hidden");
-    clearTimeout(overlayTimeout);
-    overlayTimeout = setTimeout(() => overlay.classList.add("hidden"), 5000);
-  };
-  document.addEventListener("mousemove", show);
-  document.addEventListener("touchstart", show);
-  show();
+/* =====================================================
+   ✅ FPS & PING → HUD-Anzeige
+===================================================== */
+
+// HUD-Werte aktualisieren
+function updateHud(text, isFps = false) {
+  if (isFps) hudFps = text;
+  else hudPing = text;
+  updateHudDisplay();
 }
 
-async function monitorPing(pc) {
+// HUD-Anzeige im DOM aktualisieren
+function updateHudDisplay() {
+  const hudEl = document.querySelector(".hud");
+  if (!hudEl) return;
+  hudEl.textContent = `${hudPing} | ${hudFps} | ${hudTimer}`;
+}
+
+// Ping-Messung über WebRTC-Statistiken
+function monitorPing(pc) {
   setInterval(async () => {
-    const stats = await pc.getStats();
-    let rtt = null;
-    stats.forEach(report => {
-      if (report.type === "candidate-pair" && report.state === "succeeded" && report.currentRoundTripTime)
-        rtt = (report.currentRoundTripTime * 1000).toFixed(1);
-    });
-    if (rtt) updateHud(`📡 ${rtt} ms`);
+    try {
+      const stats = await pc.getStats();
+      let rtt = null;
+      stats.forEach(report => {
+        if (report.type === "candidate-pair" && report.state === "succeeded" && report.currentRoundTripTime)
+          rtt = (report.currentRoundTripTime * 1000).toFixed(1);
+      });
+      if (rtt) updateHud(`📡 ${rtt} ms`);
+    } catch {}
   }, 1000);
 }
 
-function monitorFPS(video) {
-  let last = performance.now(), frames = 0;
+// FPS-Messung des Videostreams
+function monitorFPS(videoEl) {
+  // Exakte Methode mit requestVideoFrameCallback (wenn unterstützt)
   if ("requestVideoFrameCallback" in HTMLVideoElement.prototype) {
+    let last = performance.now(), frames = 0;
     const cb = (now) => {
       frames++;
       const diff = (now - last) / 1000;
@@ -478,79 +537,153 @@ function monitorFPS(video) {
         frames = 0;
         last = now;
       }
-      video.requestVideoFrameCallback(cb);
+      videoEl.requestVideoFrameCallback(cb);
     };
-    video.requestVideoFrameCallback(cb);
+    videoEl.requestVideoFrameCallback(cb);
+    return;
   }
+
+  // Fallback (schätzt FPS über currentTime)
+  let lastTime = 0, lastTs = Date.now(), frames = 0;
+  setInterval(() => {
+    if (!videoEl || videoEl.readyState < 2) return;
+    const ct = videoEl.currentTime;
+    frames += (ct !== lastTime) ? 1 : 0;
+    const now = Date.now();
+    const diff = (now - lastTs) / 1000;
+    if (diff >= 1) {
+      updateHud(`🎥 ${frames} FPS`, true);
+      frames = 0;
+      lastTs = now;
+    }
+    lastTime = ct;
+  }, 200);
 }
 
-let hudPing = "📡 -- ms", hudFps = "🎥 -- FPS";
+/* =====================================================
+   ✅ VR-VOLLANSICHT (Side-by-Side)
+===================================================== */
 
-function updateHud(text, isFps = false) {
-  if (isFps) hudFps = text;
-  else hudPing = text;
-  updateHudDisplay();
-}
-
-function updateHudDisplay() {
-  const hudEl = document.querySelector(".hud");
-  if (!hudEl) return;
-  hudEl.textContent = `${hudPing} | ${hudFps} | ${hudTimer}`;
-}
-
-function toggleFullscreen() {
-  if (video.requestFullscreen) video.requestFullscreen();
-  else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
-}
-
-function restartStream() { location.reload(); }
-
+// Schaltet zwischen normaler und VR-Ansicht
 function toggleView() {
-  vrMode = !vrMode;
+  vrMode = !vrMode; // Zustand umschalten
+  const body = document.body;
+  const header = document.querySelector("header");
+  const loginCard = document.getElementById("login-card");
+  const registerCard = document.getElementById("register-card");
   const streamCard = document.getElementById("stream-card");
+  const footer = document.querySelector("footer");
+  const overlay = document.querySelector(".control-overlay");
+  const hudEl = document.querySelector(".hud");
   let vrWrap = document.getElementById("vr-sbs-wrap");
 
   if (vrMode) {
+    // Kein Stream → abbrechen
     if (!currentStream) {
       statusTxt.textContent = "⚠️ Kein Stream geladen";
       vrMode = false;
       return;
     }
+
+    // Alles ausblenden außer VR-Ansicht
+    if (header) header.style.display = "none";
+    if (loginCard) loginCard.style.display = "none";
+    if (registerCard) registerCard.style.display = "none";
+    if (footer) footer.style.display = "none";
+    if (streamCard) streamCard.style.display = "none";
+    if (overlay) overlay.style.display = "none";
+    if (hudEl) hudEl.style.display = "none";
+
+    // VR-Container erzeugen (Side-by-Side)
     if (!vrWrap) {
       vrWrap = document.createElement("div");
       vrWrap.id = "vr-sbs-wrap";
-      vrWrap.style.display = "flex";
-      vrWrap.style.flexDirection = "row";
-      vrWrap.style.width = "100%";
-      const left = document.createElement("video");
-      const right = document.createElement("video");
-      [left, right].forEach(v => {
+      Object.assign(vrWrap.style, {
+        display: "flex",
+        flexDirection: "row",
+        width: "100vw",
+        height: "100vh",
+        position: "fixed",
+        top: "0",
+        left: "0",
+        zIndex: "9999",
+        background: "black",
+      });
+      // Zwei Videofenster (links/rechts)
+        const left = document.createElement("video");
+        const right = document.createElement("video");
+
+        // ✅ Wichtiger Fix gegen Flackern:
+        // Nur EIN Decoding-Buffer wird genutzt, rechtes Auge bekommt Frames via MediaStream.clone()
+        const rightStream = currentStream.clone();
+
+        [left, right].forEach((v, i) => {
         v.autoplay = true;
         v.playsInline = true;
         v.muted = true;
-        v.srcObject = currentStream;
+        v.srcObject = (i === 0) ? currentStream : rightStream;
         v.style.width = "50%";
+        v.style.height = "100%";
         v.style.objectFit = "cover";
-      });
+        v.style.background = "black";
+        v.style.transform = "translateZ(0)"; // verhindert Repaint-Delay (iOS Safari Bugfix)
+        });
+
       vrWrap.appendChild(left);
       vrWrap.appendChild(right);
-      streamCard.insertBefore(vrWrap, streamCard.querySelector(".status-bar"));
+
+      // Exit-Button oben rechts
+      const exitBtn = document.createElement("button");
+      exitBtn.textContent = "🚪";
+      exitBtn.title = "VR verlassen";
+      exitBtn.className = "overlay-btn vr-exit";
+      Object.assign(exitBtn.style, {
+        position: "absolute",
+        top: "20px",
+        right: "20px",
+        zIndex: "10000"
+      });
+      exitBtn.onclick = () => toggleView(); // Zurückschalten
+      vrWrap.appendChild(exitBtn);
+
+      document.body.appendChild(vrWrap);
     }
-    video.style.display = "none";
+
     vrWrap.style.display = "flex";
+    body.classList.add("vr-active");
+    if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
     statusTxt.textContent = "👓 VR-Modus aktiv";
   } else {
-    video.style.display = "block";
+    // Rückkehr zur normalen Ansicht
+    body.classList.remove("vr-active");
     const wrap = document.getElementById("vr-sbs-wrap");
-    if (wrap) wrap.style.display = "none";
+    if (wrap) wrap.remove();
+
+    if (header) header.style.display = "";
+    if (footer) footer.style.display = "";
+    if (streamCard) streamCard.style.display = "block";
+    if (overlay) overlay.style.display = "";
+    if (hudEl) hudEl.style.display = "";
+
+    document.exitFullscreen?.().catch(() => {});
     statusTxt.textContent = "🖥 Normal-Modus";
   }
 }
 
 /* =====================================================
-   UI FEEDBACK + NEON
+   🔧 HILFSFUNKTIONEN
 ===================================================== */
 
+// Vollbildmodus aktivieren
+function toggleFullscreen() {
+  if (video.requestFullscreen) video.requestFullscreen();
+  else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
+}
+
+// Seite neu laden (z. B. bei Streamfehler)
+function restartStream() { location.reload(); }
+
+// Kurze visuelle Rückmeldung anzeigen
 function showFeedback(message, type = "success") {
   const box = document.getElementById("ui-feedback");
   if (!box) return;
@@ -559,9 +692,25 @@ function showFeedback(message, type = "success") {
   setTimeout(() => { box.className = "ui-feedback"; }, 3000);
 }
 
+// Farbanimation für UI-Akzente
 let hue = 0;
 setInterval(() => {
   hue = (hue + 1) % 360;
   document.documentElement.style.setProperty("--primary", `hsl(${hue}, 100%, 60%)`);
   document.documentElement.style.setProperty("--secondary", `hsl(${(hue + 120) % 360}, 100%, 60%)`);
 }, 200);
+/* =====================================================
+   🔧 LOGIN VIDEO BACKGROUND HANDLING
+===================================================== */
+
+// Wenn der Benutzer sich einloggt oder registriert → Login-Hintergrund ausblenden
+function hideLoginVideo() {
+  const vid = document.getElementById("login-bg-video");
+  if (vid) {
+    vid.style.opacity = "0";
+    setTimeout(() => {
+      vid.remove();
+      document.body.classList.remove("login-active");
+    }, 800);
+  }
+}
