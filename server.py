@@ -1,6 +1,8 @@
+#!/usr/bin/env python3
 # ======================================================
-# 📦 IMPORTS – Alle benötigten Module
+# 🚀 VR-Racer Backend – Final Stable (2 feste Admins)
 # ======================================================
+
 import asyncio
 import json
 import sqlite3
@@ -20,7 +22,6 @@ from dotenv import load_dotenv
 # ======================================================
 # ⚙️ BASISKONFIGURATION
 # ======================================================
-
 load_dotenv()
 
 pcs = set()
@@ -30,18 +31,10 @@ camera = MotionCameraStream(camera_index=0, target_size=(1280, 720))
 DB_PATH = "users.db"
 KEY_FILE = "secret.key"
 
-JWT_SECRET = os.getenv("JWT_SECRET")
-JWT_EXPIRE_MINUTES_STR = os.getenv("JWT_EXPIRE_MINUTES")
-
-if not JWT_SECRET:
-    raise RuntimeError("❌ Kein JWT_SECRET in .env gefunden!")
-if not JWT_EXPIRE_MINUTES_STR:
-    raise RuntimeError("❌ Keine Ablaufzeit (JWT_EXPIRE_MINUTES) in .env gefunden!")
-
-try:
-    JWT_EXPIRE_MINUTES = int(JWT_EXPIRE_MINUTES_STR)
-except ValueError:
-    raise RuntimeError("❌ JWT_EXPIRE_MINUTES muss eine Ganzzahl sein!")
+JWT_SECRET = os.getenv("JWT_SECRET", "fallback_secret_key")
+JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+ADMIN_G_PASS = os.getenv("ADMIN_G_PASS", "admin123")
+ADMIN_D_PASS = os.getenv("ADMIN_D_PASS", "admin123")
 
 # ======================================================
 # 🔐 HASH & VERSCHLÜSSELUNG
@@ -51,6 +44,7 @@ def hash_pw(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 def load_key() -> bytes:
+    """Erzeugt automatisch einen neuen Key, wenn keiner vorhanden ist"""
     try:
         with open(KEY_FILE, "rb") as f:
             return f.read()
@@ -84,34 +78,42 @@ def init_db():
             is_admin INTEGER DEFAULT 0
         )
     """)
-    conn.commit()
     ensure_is_admin_column(c)
     conn.commit()
 
+    # 🔐 Admins aus .env laden
     admins = {
-        "Admin_G": os.getenv("ADMIN_G_PASS"),
-        "Admin_D": os.getenv("ADMIN_D_PASS")
+        "Admin_G": ADMIN_G_PASS,
+        "Admin_D": ADMIN_D_PASS
     }
 
+    # Bestehende User abrufen
+    c.execute("SELECT username FROM users")
+    rows = c.fetchall()
+    existing_names = set()
+
+    for (enc_name,) in rows:
+        try:
+            name = fernet.decrypt(enc_name.encode()).decode()
+            existing_names.add(name)
+        except Exception:
+            continue
+
+    # 🔁 Admins hinzufügen, wenn sie fehlen
     for name, pw in admins.items():
         if not pw:
+            print(f"⚠️ Kein Passwort für {name} in .env gefunden – wird übersprungen.")
             continue
-        c.execute("SELECT username FROM users")
-        rows = c.fetchall()
-        exists = False
-        for (enc,) in rows:
-            try:
-                if fernet.decrypt(enc.encode()).decode() == name:
-                    exists = True
-                    break
-            except Exception:
-                continue
-        if not exists:
+        if name not in existing_names:
             enc_user = fernet.encrypt(name.encode()).decode()
             c.execute(
                 "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, 1)",
                 (enc_user, hash_pw(pw)),
             )
+            print(f"👑 Admin '{name}' neu erstellt.")
+        else:
+            print(f"✅ Admin '{name}' existiert bereits – wird nicht neu erstellt.")
+
     conn.commit()
     conn.close()
     print(f"✅ Datenbank initialisiert: {DB_PATH}")
@@ -184,7 +186,25 @@ def get_all_users() -> List[Dict]:
 def delete_user(user_id: int) -> bool:
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("DELETE FROM users WHERE id = ? AND is_admin = 0", (user_id,))
+    c.execute("SELECT username, is_admin FROM users WHERE id = ?", (user_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return False
+
+    enc_name, is_admin = row
+    try:
+        name = fernet.decrypt(enc_name.encode()).decode()
+    except Exception:
+        name = ""
+
+    # Admins dürfen nicht gelöscht werden
+    if name in ("Admin_G", "Admin_D") or is_admin == 1:
+        conn.close()
+        print(f"🚫 Versuch, Admin '{name}' zu löschen – blockiert.")
+        return False
+
+    c.execute("DELETE FROM users WHERE id = ?", (user_id,))
     conn.commit()
     deleted = c.rowcount > 0
     conn.close()
@@ -193,13 +213,22 @@ def delete_user(user_id: int) -> bool:
 def update_user(user_id: int, new_username: Optional[str], new_password: Optional[str]) -> (bool, str):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,))
+    c.execute("SELECT username, is_admin FROM users WHERE id = ?", (user_id,))
     row = c.fetchone()
     if not row:
         conn.close()
         return False, "not_found"
-    if row[0] == 1:
+
+    enc_name, is_admin = row
+    try:
+        name = fernet.decrypt(enc_name.encode()).decode()
+    except Exception:
+        name = ""
+
+    # Admins sperren
+    if name in ("Admin_G", "Admin_D") or is_admin == 1:
         conn.close()
+        print(f"🚫 Versuch, Admin '{name}' zu ändern – blockiert.")
         return False, "admin_locked"
 
     if new_username:
@@ -217,7 +246,7 @@ def update_user(user_id: int, new_username: Optional[str], new_password: Optiona
     return True, "ok"
 
 # ======================================================
-# 🔑 JWT (TOKEN AUTHENTIFIZIERUNG)
+# 🔑 JWT AUTHENTIFIZIERUNG
 # ======================================================
 
 def create_token(username: str, is_admin: bool) -> str:
@@ -245,7 +274,7 @@ def require_auth(request: web.Request, admin_required: bool = False):
     return data
 
 # ======================================================
-# 🌐 API-ENDPUNKTE (REST)
+# 🌐 API-ENDPUNKTE
 # ======================================================
 
 async def login(request: web.Request) -> web.Response:
@@ -302,18 +331,6 @@ async def offer(request: web.Request) -> web.Response:
         return web.Response(status=500, text="Offer error")
 
 # ======================================================
-# 🔧 FRONTEND ROUTEN
-# ======================================================
-
-async def index(request: web.Request) -> web.Response:
-    return web.FileResponse("templates/index1.html")
-
-async def javascript(request: web.Request) -> web.Response:
-    return web.FileResponse("static/js/client1.js")
-
-async def dashboard(request: web.Request) -> web.Response:
-    return web.FileResponse("templates/dashboard.html")
-# ======================================================
 # 👑 ADMIN-ENDPUNKTE
 # ======================================================
 
@@ -356,9 +373,19 @@ async def admin_update(request: web.Request) -> web.Response:
     if reason == "name_exists":
         return web.Response(status=409, text="Name exists")
     return web.Response(status=404, text="User not found")
+
 # ======================================================
-# 🧹 SERVER-SHUTDOWN
+# 🌍 ROUTEN UND SERVER-SETUP
 # ======================================================
+
+async def index(request: web.Request) -> web.Response:
+    return web.FileResponse("templates/index1.html")
+
+async def javascript(request: web.Request) -> web.Response:
+    return web.FileResponse("static/js/client1.js")
+
+async def dashboard(request: web.Request) -> web.Response:
+    return web.FileResponse("templates/dashboard.html")
 
 async def on_shutdown(app: web.Application):
     camera.stop()
@@ -367,10 +394,6 @@ async def on_shutdown(app: web.Application):
     pcs.clear()
     print("📷 Kamera gestoppt")
     print("🛑 Server beendet.")
-
-# ======================================================
-# 🚀 SERVER-START
-# ======================================================
 
 def create_app() -> web.Application:
     init_db()
@@ -381,13 +404,13 @@ def create_app() -> web.Application:
     app.router.add_post("/login", login)
     app.router.add_post("/register", register)
     app.router.add_post("/offer", offer)
-    app.router.add_static("/static/", path="static", name="static")
     app.router.add_get("/admin/users", admin_users)
     app.router.add_post("/admin/delete", admin_delete)
     app.router.add_post("/admin/update", admin_update)
+    app.router.add_static("/static/", path="static", name="static")
     app.on_shutdown.append(on_shutdown)
     return app
 
 if __name__ == "__main__":
-    print("🚀 Starte VR-Racer Backend...")
+    print("🚀 Starte VR-Racer Backend (2 Admins geschützt)...")
     web.run_app(create_app(), host="0.0.0.0", port=8080)

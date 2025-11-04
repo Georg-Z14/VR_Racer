@@ -246,6 +246,23 @@ video {
   transform: scale(1.1);
   box-shadow: 0 0 20px var(--secondary);
 }
+/* Abmelde-Button (Logout) */
+#logout-btn {
+  background: linear-gradient(135deg, #ff0040, #ff00aa);
+  border: 2px solid #ff007a;
+  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+  color: #fff;
+  font-size: 1.2em;
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(255,0,100,0.5);
+  transition: all 0.25s ease;
+}
+#logout-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 30px #ff007a;
+}
 
 /* ======================================================
    ADMIN PANEL POPUP

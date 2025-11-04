@@ -60,6 +60,8 @@ async function login() {
       // Token-Ablauf-Überwachung starten
       scheduleTokenExpiryLogout();
 
+      createOverlay();
+
       // Nach kurzer Zeit zum Stream wechseln
       setTimeout(() => {
         card.style.display = "none";
@@ -430,6 +432,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("stream-card").style.display = "block";
     start(); // Stream starten
   }
+  createOverlay();
 });
 
 /* =====================================================
@@ -478,7 +481,11 @@ async function start() {
 
 // Overlay mit Buttons (Neu laden, VR etc.)
 function createOverlay() {
-  if (document.querySelector(".control-overlay")) return; // Nur einmal erzeugen
+  // Entferne altes Overlay, falls vorhanden (wichtig!)
+  const oldOverlay = document.querySelector(".control-overlay");
+  if (oldOverlay) oldOverlay.remove();
+
+  // Neues Overlay erzeugen
   const overlay = document.createElement("div");
   overlay.className = "control-overlay";
   overlay.innerHTML = `
@@ -486,6 +493,7 @@ function createOverlay() {
     <button class="overlay-btn" title="Vollbild" onclick="toggleFullscreen()">🖥️</button>
     <button class="overlay-btn" title="VR-Modus" onclick="toggleView()">👓</button>
     ${isAdmin ? `<button class="overlay-btn" title="Benutzerverwaltung" onclick="openAdminPanel()">🛠️</button>` : ""}
+    <button class="overlay-btn" title="Abmelden" onclick="logoutUser()">🚪</button>
   `;
   document.querySelector(".status-bar").appendChild(overlay);
 }
@@ -713,4 +721,30 @@ function hideLoginVideo() {
       document.body.classList.remove("login-active");
     }, 800);
   }
+}
+
+/* =====================================================
+   🚪 MANUELLER LOGOUT (ALLE BENUTZER)
+===================================================== */
+function logoutUser() {
+  // Verbindung schließen, falls vorhanden
+  try {
+    if (pc) pc.close();
+  } catch {}
+
+  // Token & Status löschen
+  localStorage.removeItem("jwt_token");
+  localStorage.removeItem("jwt_expiry");
+  localStorage.removeItem("is_admin");
+
+  token = null;
+  tokenExpiry = null;
+  isAdmin = false;
+
+  showFeedback("👋 Erfolgreich abgemeldet!", "success");
+
+  // Nach 1 Sekunde zurück zur Login-Seite
+  setTimeout(() => {
+    location.reload();
+  }, 1000);
 }
