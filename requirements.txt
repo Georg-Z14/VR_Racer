@@ -1,0 +1,10 @@
+aiohttp
+aiortc
+av
+cryptography
+python-dotenv
+PyJWT
+opencv-python
+numpy
+inputs
+RF24
