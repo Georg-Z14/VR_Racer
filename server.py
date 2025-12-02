@@ -412,5 +412,5 @@ def create_app() -> web.Application:
     return app
 
 if __name__ == "__main__":
-    print("🚀 Starte VR-Racer Backend (2 Admins geschützt)...")
+    print("🚀 Starte VR-Racer ")
     web.run_app(create_app(), host="0.0.0.0", port=8080)

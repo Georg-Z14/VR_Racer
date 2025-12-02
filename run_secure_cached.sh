@@ -10,7 +10,7 @@ set -euo pipefail
 ENV_FILE=".env"                  # unverschlüsselte Umgebungsvariablen
 SERVER_SCRIPT="server.py"        # Python-Server, der gestartet werden soll
 PYTHON_BIN="${PYTHON_BIN:-python3}"   # Python-Interpreter
-LOGFILE="$(pwd)/server.log"      # Log-Datei im Projektverzeichnis
+# Ausgabe bleibt auf STDOUT/STDERR – keine server.log mehr
 
 # ======================================================
 # 🧩 GRUNDPRÜFUNG
@@ -41,7 +41,7 @@ set +o allexport
 # 🚀 SERVER STARTEN
 # ======================================================
 echo "🚀 Starte VR-Racer Server..."
-$PYTHON_BIN "$SERVER_SCRIPT" > "$LOGFILE" 2>&1 &  # Server im Hintergrund starten
+$PYTHON_BIN "$SERVER_SCRIPT" &  # Server im Hintergrund starten
 SERVER_PID=$!
 
 # ======================================================
