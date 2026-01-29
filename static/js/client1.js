@@ -3,11 +3,15 @@ let authPassword = null;      // Wird aktuell nicht genutzt, Platzhalter für k�
 let vrMode = false;           // Gibt an, ob der VR-Modus aktiv ist
 let overlayTimeout;           // Timeout für Overlay-Anzeigen
 let currentStream = null;     // Aktueller Video-Stream (WebRTC)
+let rightStream = null;       // Zweiter Video-Stream (VR rechts)
 let pc;                       // RTCPeerConnection-Objekt (WebRTC-Verbindung)
 let isAdmin = false;          // Benutzerrolle (Admin oder normaler Nutzer)
 let token = null;             // JWT-Token für Login-Sitzung
 let tokenExpiry = null;       // Zeitpunkt, wann der Token abläuft
 let tokenTimer = null;        // Timer für automatischen Logout bei Ablauf
+let pingTimer = null;         // Ping-Interval
+let fpsMonitorStarted = false;
+let connecting = false;
 
 // HUD-Werte (werden später im Stream angezeigt)
 let hudTimer = "⏰ --:--";     // Zeigt verbleibende Login-Zeit
@@ -442,41 +446,71 @@ document.addEventListener("DOMContentLoaded", () => {
 const video = document.getElementById("video");   // Videotag
 const statusTxt = document.getElementById("status"); // Statusanzeige
 
+function resetStreams() {
+  currentStream = null;
+  rightStream = null;
+  if (video) video.srcObject = null;
+}
+
 // Verbindung zu WebRTC-Server aufbauen
-async function start() {
+async function start({ vr = false } = {}) {
+  if (connecting) return;
+  connecting = true;
   statusTxt.textContent = "🔄 Verbinde...";
-  pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] }); // Google STUN-Server
-  pc.addTransceiver("video", { direction: "recvonly" }); // Nur Empfang (kein Upload)
+  resetStreams();
+  try {
+    pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] }); // Google STUN-Server
+    pc.addTransceiver("video", { direction: "recvonly" }); // Linke Kamera
+    if (vr) pc.addTransceiver("video", { direction: "recvonly" }); // Rechte Kamera (VR)
 
-  // Wenn Videostream eintrifft
-  pc.ontrack = (event) => {
-    currentStream = event.streams[0];
-    video.srcObject = currentStream;
-    monitorFPS(video);  // FPS-Messung starten
-    createOverlay();    // Steuer-Overlay anzeigen
-  };
+    // Wenn Videostream eintrifft
+    pc.ontrack = (event) => {
+      if (event.track.kind !== "video") return;
 
-  // WebRTC-Handshake
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  const res = await fetch("/offer", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`
-    },
-    body: JSON.stringify(pc.localDescription)
-  });
+      if (!currentStream) {
+        currentStream = new MediaStream([event.track]);
+        video.srcObject = currentStream;
+        if (!fpsMonitorStarted) {
+          monitorFPS(video);
+          fpsMonitorStarted = true;
+        }
+        createOverlay();    // Steuer-Overlay anzeigen
+      } else if (!rightStream) {
+        rightStream = new MediaStream([event.track]);
+      }
+      updateVrSources();
+    };
 
-  if (!res.ok) {
-    statusTxt.textContent = "❌ Zugriff verweigert!";
-    return;
+    // WebRTC-Handshake
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    const res = await fetch("/offer", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        sdp: pc.localDescription.sdp,
+        type: pc.localDescription.type,
+        vr
+      })
+    });
+
+    if (!res.ok) {
+      statusTxt.textContent = "❌ Zugriff verweigert!";
+      return;
+    }
+
+    const answer = await res.json();
+    await pc.setRemoteDescription(answer);
+    statusTxt.textContent = vr ? "✅ VR verbunden!" : "✅ Verbunden!";
+    monitorPing(pc); // Ping messen
+  } catch {
+    statusTxt.textContent = "⚠️ Stream-Fehler!";
+  } finally {
+    connecting = false;
   }
-
-  const answer = await res.json();
-  await pc.setRemoteDescription(answer);
-  statusTxt.textContent = "✅ Verbunden!";
-  monitorPing(pc); // Ping messen
 }
 
 // Overlay mit Buttons (Neu laden, VR etc.)
@@ -496,6 +530,32 @@ function createOverlay() {
     <button class="overlay-btn" title="Abmelden" onclick="logoutUser()">🚪</button>
   `;
   document.querySelector(".status-bar").appendChild(overlay);
+}
+
+async function stopConnection() {
+  if (pc) {
+    pc.ontrack = null;
+    const receivers = pc.getReceivers ? pc.getReceivers() : [];
+    receivers.forEach(r => r.track && r.track.stop());
+    pc.close();
+    pc = null;
+  }
+  if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+  if (rightStream) rightStream.getTracks().forEach(t => t.stop());
+  resetStreams();
+}
+
+async function switchStreamMode(vr) {
+  if (connecting) return;
+  await stopConnection();
+  await start({ vr });
+}
+
+function updateVrSources() {
+  const left = document.getElementById("vr-left");
+  const right = document.getElementById("vr-right");
+  if (left && currentStream) left.srcObject = currentStream;
+  if (right && rightStream) right.srcObject = rightStream;
 }
 
 /* =====================================================
@@ -518,7 +578,8 @@ function updateHudDisplay() {
 
 // Ping-Messung über WebRTC-Statistiken
 function monitorPing(pc) {
-  setInterval(async () => {
+  if (pingTimer) clearInterval(pingTimer);
+  pingTimer = setInterval(async () => {
     try {
       const stats = await pc.getStats();
       let rtt = null;
@@ -573,7 +634,7 @@ function monitorFPS(videoEl) {
 ===================================================== */
 
 // Schaltet zwischen normaler und VR-Ansicht
-function toggleView() {
+async function toggleView() {
   vrMode = !vrMode; // Zustand umschalten
   const body = document.body;
   const header = document.querySelector("header");
@@ -586,12 +647,7 @@ function toggleView() {
   let vrWrap = document.getElementById("vr-sbs-wrap");
 
   if (vrMode) {
-    // Kein Stream → abbrechen
-    if (!currentStream) {
-      statusTxt.textContent = "⚠️ Kein Stream geladen";
-      vrMode = false;
-      return;
-    }
+    await switchStreamMode(true);
 
     // Alles ausblenden außer VR-Ansicht
     if (header) header.style.display = "none";
@@ -618,24 +674,21 @@ function toggleView() {
         background: "black",
       });
       // Zwei Videofenster (links/rechts)
-        const left = document.createElement("video");
-        const right = document.createElement("video");
+      const left = document.createElement("video");
+      const right = document.createElement("video");
+      left.id = "vr-left";
+      right.id = "vr-right";
 
-        // ✅ Wichtiger Fix gegen Flackern:
-        // Nur EIN Decoding-Buffer wird genutzt, rechtes Auge bekommt Frames via MediaStream.clone()
-        const rightStream = currentStream.clone();
-
-        [left, right].forEach((v, i) => {
+      [left, right].forEach((v) => {
         v.autoplay = true;
         v.playsInline = true;
         v.muted = true;
-        v.srcObject = (i === 0) ? currentStream : rightStream;
         v.style.width = "50%";
         v.style.height = "100%";
         v.style.objectFit = "cover";
         v.style.background = "black";
         v.style.transform = "translateZ(0)"; // verhindert Repaint-Delay (iOS Safari Bugfix)
-        });
+      });
 
       vrWrap.appendChild(left);
       vrWrap.appendChild(right);
@@ -657,10 +710,17 @@ function toggleView() {
       document.body.appendChild(vrWrap);
     }
 
+    updateVrSources();
     vrWrap.style.display = "flex";
     body.classList.add("vr-active");
     if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
     statusTxt.textContent = "👓 VR-Modus aktiv";
+
+    setTimeout(() => {
+      if (vrMode && !rightStream) {
+        statusTxt.textContent = "⚠️ VR-Kamera nicht verfügbar";
+      }
+    }, 2000);
   } else {
     // Rückkehr zur normalen Ansicht
     body.classList.remove("vr-active");
@@ -674,6 +734,7 @@ function toggleView() {
     if (hudEl) hudEl.style.display = "";
 
     document.exitFullscreen?.().catch(() => {});
+    await switchStreamMode(false);
     statusTxt.textContent = "🖥 Normal-Modus";
   }
 }

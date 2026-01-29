@@ -11,6 +11,7 @@ import os
 import jwt
 import datetime
 import traceback
+import threading
 from typing import List, Dict, Optional
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
@@ -26,7 +27,50 @@ load_dotenv()
 
 pcs = set()
 relay = MediaRelay()
-camera = MotionCameraStream(camera_index=0, target_size=(1280, 720))
+camera_manager = None
+
+
+class CameraManager:
+    def __init__(self, relay: MediaRelay, target_size=(1280, 720), sensitivity=40):
+        self._relay = relay
+        self._target_size = target_size
+        self._sensitivity = sensitivity
+        self._lock = threading.Lock()
+        self._vr_clients = 0
+        self.camera1 = MotionCameraStream(camera_index=0, target_size=target_size, sensitivity=sensitivity)
+        self.camera2 = None
+
+    def acquire_vr(self):
+        with self._lock:
+            if self.camera2 is None:
+                self.camera2 = MotionCameraStream(camera_index=1, target_size=self._target_size,
+                                                  sensitivity=self._sensitivity)
+            self._vr_clients += 1
+
+    def release_vr(self):
+        with self._lock:
+            if self._vr_clients > 0:
+                self._vr_clients -= 1
+            if self._vr_clients == 0 and self.camera2:
+                self.camera2.stop()
+                self.camera2 = None
+
+    def get_tracks(self, vr_mode: bool):
+        track_left = self._relay.subscribe(self.camera1)
+        if not vr_mode:
+            return [track_left]
+        if self.camera2 is None:
+            raise RuntimeError("Kamera 2 ist nicht verfügbar")
+        track_right = self._relay.subscribe(self.camera2)
+        return [track_left, track_right]
+
+    def stop_all(self):
+        self.camera1.stop()
+        if self.camera2:
+            self.camera2.stop()
+            self.camera2 = None
+
+
 
 DB_PATH = "users.db"
 KEY_FILE = "secret.key"
@@ -35,6 +79,15 @@ JWT_SECRET = os.getenv("JWT_SECRET", "fallback_secret_key")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
 ADMIN_G_PASS = os.getenv("ADMIN_G_PASS", "admin123")
 ADMIN_D_PASS = os.getenv("ADMIN_D_PASS", "admin123")
+
+
+def configure_multicore():
+    cpu_count = os.cpu_count() or 1
+    try:
+        os.sched_setaffinity(0, set(range(cpu_count)))
+        print(f"⚙️ CPU-Affinität gesetzt: {cpu_count} Kerne")
+    except (AttributeError, PermissionError, OSError):
+        pass
 
 # ======================================================
 # 🔐 HASH & VERSCHLÜSSELUNG
@@ -307,19 +360,26 @@ async def offer(request: web.Request) -> web.Response:
 
     try:
         params = await request.json()
+        vr_mode = bool(params.get("vr", False))
         offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
         pc = RTCPeerConnection()
         pcs.add(pc)
+        pc.is_vr = vr_mode
+
+        if vr_mode:
+            camera_manager.acquire_vr()
 
         @pc.on("connectionstatechange")
         async def on_state_change():
             if pc.connectionState in ("failed", "closed", "disconnected"):
                 await pc.close()
+                if getattr(pc, "is_vr", False):
+                    camera_manager.release_vr()
                 pcs.discard(pc)
 
         await pc.setRemoteDescription(offer)
-        track = relay.subscribe(camera)
-        pc.addTrack(track)
+        for track in camera_manager.get_tracks(vr_mode):
+            pc.addTrack(track)
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
         return web.json_response({
@@ -328,6 +388,8 @@ async def offer(request: web.Request) -> web.Response:
         })
     except Exception:
         print("💥 [offer] Fehler:\n" + traceback.format_exc())
+        if 'vr_mode' in locals() and vr_mode:
+            camera_manager.release_vr()
         return web.Response(status=500, text="Offer error")
 
 # ======================================================
@@ -388,7 +450,8 @@ async def dashboard(request: web.Request) -> web.Response:
     return web.FileResponse("templates/dashboard.html")
 
 async def on_shutdown(app: web.Application):
-    camera.stop()
+    if camera_manager:
+        camera_manager.stop_all()
     for pc in list(pcs):
         await pc.close()
     pcs.clear()
@@ -396,7 +459,10 @@ async def on_shutdown(app: web.Application):
     print("🛑 Server beendet.")
 
 def create_app() -> web.Application:
+    global camera_manager
     init_db()
+    if camera_manager is None:
+        camera_manager = CameraManager(relay, target_size=(1280, 720))
     app = web.Application()
     app.router.add_get("/", index)
     app.router.add_get("/dashboard", dashboard)
@@ -413,4 +479,5 @@ def create_app() -> web.Application:
 
 if __name__ == "__main__":
     print("🚀 Starte VR-Racer ")
+    configure_multicore()
     web.run_app(create_app(), host="0.0.0.0", port=8080)
