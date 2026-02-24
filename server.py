@@ -63,6 +63,12 @@ class CameraManager:
         self._lock = threading.Lock()
         self._vr_clients = 0
 
+        print(
+            f"🎥 Camera cfg: size={target_size[0]}x{target_size[1]} "
+            f"fmt={CAMERA_PIXEL_FORMAT} frame={CAMERA_FRAME_FORMAT} "
+            f"swap_rb={int(CAMERA_SWAP_RB)} buffers={CAMERA_BUFFER_COUNT} "
+            f"queue={int(CAMERA_QUEUE)} max_fps={CAMERA_MAX_FPS}"
+        )
         self.camera1_proc = CameraProcess(
             camera_index=0,
             target_size=target_size,

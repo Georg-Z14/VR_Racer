@@ -141,27 +141,17 @@ def _camera_worker(
     shm = SharedMemory(name=shm_name)
     shared_frame = np.ndarray((height, width, 3), dtype=np.uint8, buffer=shm.buf)
 
-    frame_interval = None
-    next_frame_time = None
-    if max_fps and max_fps > 0:
-        frame_interval = 1.0 / max_fps
-        next_frame_time = time.monotonic()
-
     try:
         while not stop_event.is_set():
             frame = picam.capture_array()
-            if swap_rb:
-                frame = frame[:, :, ::-1].copy()
             if frame.shape[0] != height or frame.shape[1] != width:
                 frame = cv2.resize(frame, (width, height))
-            with lock:
-                np.copyto(shared_frame, frame)
-
-            if frame_interval is not None and next_frame_time is not None:
-                next_frame_time += frame_interval
-                sleep_for = next_frame_time - time.monotonic()
-                if sleep_for > 0:
-                    time.sleep(sleep_for)
+            if swap_rb:
+                with lock:
+                    np.copyto(shared_frame, frame[:, :, ::-1])
+            else:
+                with lock:
+                    np.copyto(shared_frame, frame)
     finally:
         try:
             picam.stop()
