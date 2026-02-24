@@ -51,6 +51,8 @@ CAMERA_USE_ALL_CORES = _parse_bool(os.getenv("CAMERA_USE_ALL_CORES", "1"), True)
 CAMERA_SWAP_RB = _parse_bool(os.getenv("CAMERA_SWAP_RB", "0"), False)
 CAMERA_BUFFER_COUNT = int(os.getenv("CAMERA_BUFFER_COUNT", "2"))
 CAMERA_QUEUE = _parse_bool(os.getenv("CAMERA_QUEUE", "0"), False)
+CAMERA_PIXEL_FORMAT = os.getenv("CAMERA_FORMAT", "RGB888")
+CAMERA_FRAME_FORMAT = os.getenv("VIDEO_FRAME_FORMAT", "rgb24")
 
 
 class CameraManager:
@@ -66,6 +68,8 @@ class CameraManager:
             target_size=target_size,
             max_fps=CAMERA_MAX_FPS,
             use_all_cores=CAMERA_USE_ALL_CORES,
+            pixel_format=CAMERA_PIXEL_FORMAT,
+            frame_format=CAMERA_FRAME_FORMAT,
             swap_rb=CAMERA_SWAP_RB,
             buffer_count=CAMERA_BUFFER_COUNT,
             queue=CAMERA_QUEUE,
@@ -83,6 +87,8 @@ class CameraManager:
                     target_size=self._target_size,
                     max_fps=CAMERA_MAX_FPS,
                     use_all_cores=CAMERA_USE_ALL_CORES,
+                    pixel_format=CAMERA_PIXEL_FORMAT,
+                    frame_format=CAMERA_FRAME_FORMAT,
                     swap_rb=CAMERA_SWAP_RB,
                     buffer_count=CAMERA_BUFFER_COUNT,
                     queue=CAMERA_QUEUE,

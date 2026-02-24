@@ -114,6 +114,7 @@ def _camera_worker(
     camera_index: int,
     max_fps: float,
     use_all_cores: bool,
+    pixel_format: str,
     swap_rb: bool,
     buffer_count: int,
     queue: bool,
@@ -129,7 +130,7 @@ def _camera_worker(
         controls["FrameRate"] = max_fps
 
     config = picam.create_video_configuration(
-        main={"size": (width, height), "format": "RGB888"},
+        main={"size": (width, height), "format": pixel_format},
         controls=controls,
         buffer_count=buffer_count,
         queue=queue,
@@ -176,6 +177,8 @@ class CameraProcess:
         target_size=(1280, 720),
         max_fps=None,
         use_all_cores=True,
+        pixel_format: str = "RGB888",
+        frame_format: str = "rgb24",
         swap_rb: bool = False,
         buffer_count: int = 2,
         queue: bool = False,
@@ -186,6 +189,7 @@ class CameraProcess:
         self._lock = self._ctx.Lock()
         self._stop_event = self._ctx.Event()
         self._shm = SharedMemory(create=True, size=self._width * self._height * 3)
+        self._frame_format = frame_format
         self._proc = self._ctx.Process(
             target=_camera_worker,
             args=(
@@ -195,6 +199,7 @@ class CameraProcess:
                 camera_index,
                 max_fps,
                 use_all_cores,
+                pixel_format,
                 swap_rb,
                 buffer_count,
                 queue,
@@ -218,7 +223,7 @@ class CameraProcess:
         return self._width, self._height
 
     def create_track(self):
-        return SharedMemoryCameraStream(self._shm.name, self.target_size, self._lock)
+        return SharedMemoryCameraStream(self._shm.name, self.target_size, self._lock, self._frame_format)
 
     def stop(self):
         self._stop_event.set()
@@ -238,11 +243,18 @@ class CameraProcess:
 
 
 class SharedMemoryCameraStream(VideoStreamTrack):
-    def __init__(self, shm_name: str, target_size=(1280, 720), lock: Optional[mp.Lock] = None):
+    def __init__(
+        self,
+        shm_name: str,
+        target_size=(1280, 720),
+        lock: Optional[mp.Lock] = None,
+        frame_format: str = "rgb24",
+    ):
         super().__init__()
         width, height = target_size
         self._shm = SharedMemory(name=shm_name)
         self._lock = lock
+        self._frame_format = frame_format
         self._shared_frame = np.ndarray((height, width, 3), dtype=np.uint8, buffer=self._shm.buf)
         self._local_frame = np.zeros((height, width, 3), dtype=np.uint8)
 
@@ -253,7 +265,7 @@ class SharedMemoryCameraStream(VideoStreamTrack):
                 np.copyto(self._local_frame, self._shared_frame)
         else:
             np.copyto(self._local_frame, self._shared_frame)
-        frm = VideoFrame.from_ndarray(self._local_frame, format="rgb24")
+        frm = VideoFrame.from_ndarray(self._local_frame, format=self._frame_format)
         frm.pts = pts
         frm.time_base = time_base
         return frm
