@@ -425,6 +425,9 @@ async def register(request: web.Request) -> web.Response:
         return web.Response(status=200, text="User created")
     return web.Response(status=500, text="Error creating user")
 
+async def ping(request: web.Request) -> web.Response:
+    return web.Response(status=204)
+
 async def offer(request: web.Request) -> web.Response:
     if STREAM_BACKEND != "python":
         return web.Response(status=503, text="Streaming disabled (go2rtc mode)")
@@ -542,6 +545,7 @@ def create_app() -> web.Application:
     app.router.add_get("/", index)
     app.router.add_get("/dashboard", dashboard)
     app.router.add_get("/client1.js", javascript)
+    app.router.add_get("/ping", ping)
     app.router.add_post("/login", login)
     app.router.add_post("/register", register)
     if STREAM_BACKEND == "python":

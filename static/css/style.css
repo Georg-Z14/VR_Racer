@@ -220,6 +220,12 @@ video-rtc video {
   height: auto;
   border-radius: 14px;
 }
+#vr-sbs-wrap video-rtc {
+  width: 50%;
+  height: 100%;
+  display: block;
+  background: #000;
+}
 .status-bar {
   display: flex;
   justify-content: space-between;

@@ -6,6 +6,9 @@ let currentStream = null;     // Aktueller Video-Stream (WebRTC)
 let rightStream = null;       // Zweiter Video-Stream (VR rechts)
 let pc;                       // RTCPeerConnection-Objekt (nicht genutzt im go2rtc-Modus)
 let go2rtcPlayer = null;
+let vrLeftPlayer = null;
+let vrRightPlayer = null;
+let go2rtcScriptLoaded = false;
 let isAdmin = false;          // Benutzerrolle (Admin oder normaler Nutzer)
 let token = null;             // JWT-Token für Login-Sitzung
 let tokenExpiry = null;       // Zeitpunkt, wann der Token abläuft
@@ -20,7 +23,8 @@ let hudPing = "📡 -- ms";      // Netzwerkverzögerung
 let hudFps  = "🎥 -- FPS";     // Frames pro Sekunde
 
 // go2rtc-Settings
-const GO2RTC_STREAM = "cam";
+const GO2RTC_STREAM_PRIMARY = "cam_r"; // Rechte Kamera (Standard)
+const GO2RTC_STREAM_VR = "cam_l";      // Linke Kamera (nur im VR-Modus)
 const GO2RTC_PORT = 1984;
 
 /* =====================================================
@@ -457,25 +461,146 @@ function resetStreams() {
     go2rtcPlayer.remove();
     go2rtcPlayer = null;
   }
+  if (vrLeftPlayer) {
+    vrLeftPlayer.remove();
+    vrLeftPlayer = null;
+  }
+  if (vrRightPlayer) {
+    vrRightPlayer.remove();
+    vrRightPlayer = null;
+  }
+}
+
+function getVideoFromPlayer(player) {
+  if (!player) return null;
+  if (player.video) return player.video;
+  const direct = player.querySelector("video");
+  if (direct) return direct;
+  const shadow = player.shadowRoot ? player.shadowRoot.querySelector("video") : null;
+  return shadow || null;
+}
+
+function loadGo2RTCScript() {
+  return new Promise((resolve, reject) => {
+    if (go2rtcScriptLoaded) return resolve();
+    const script = document.createElement("script");
+    const scheme = location.protocol === "https:" ? "https" : "http";
+    script.src = `${scheme}://${location.hostname}:${GO2RTC_PORT}/video-rtc.js`;
+    script.onload = () => {
+      go2rtcScriptLoaded = true;
+      resolve();
+    };
+    script.onerror = () => reject(new Error("go2rtc script load failed"));
+    document.head.appendChild(script);
+  });
+}
+
+function createGo2RTCPlayer(streamName) {
+  const player = document.createElement("video-rtc");
+  player.setAttribute("autoplay", "");
+  player.setAttribute("playsinline", "");
+  player.setAttribute("muted", "true");
+  player.style.width = "100%";
+  player.style.height = "100%";
+  const wsScheme = location.protocol === "https:" ? "wss" : "ws";
+  const wsUrl = `${wsScheme}://${location.hostname}:${GO2RTC_PORT}/api/ws?src=${streamName}`;
+  player.setAttribute("src", wsUrl);
+  return player;
+}
+
+function attachFpsMonitor(player) {
+  let tries = 0;
+  const timer = setInterval(() => {
+    const vid = getVideoFromPlayer(player);
+    if (vid && !fpsMonitorStarted) {
+      monitorFPS(vid);
+      fpsMonitorStarted = true;
+      clearInterval(timer);
+    }
+    if (++tries > 10) clearInterval(timer);
+  }, 300);
 }
 
 async function startGo2RTC() {
+  await loadGo2RTCScript();
   const wrap = document.getElementById("player-wrap");
   if (!wrap) throw new Error("player wrap missing");
 
-  go2rtcPlayer = document.createElement("iframe");
-  go2rtcPlayer.id = "go2rtc-frame";
-  go2rtcPlayer.setAttribute("allow", "autoplay; fullscreen");
-  go2rtcPlayer.setAttribute("allowfullscreen", "");
-  go2rtcPlayer.style.border = "0";
-  go2rtcPlayer.style.width = "100%";
-  go2rtcPlayer.style.height = "100%";
-
-  const scheme = location.protocol === "https:" ? "https" : "http";
-  go2rtcPlayer.src = `${scheme}://${location.hostname}:${GO2RTC_PORT}/stream.html?src=${GO2RTC_STREAM}`;
-
+  go2rtcPlayer = createGo2RTCPlayer(GO2RTC_STREAM_PRIMARY);
   wrap.innerHTML = "";
   wrap.appendChild(go2rtcPlayer);
+
+  setTimeout(() => attachFpsMonitor(go2rtcPlayer), 600);
+}
+
+async function startGo2RTCVR() {
+  await loadGo2RTCScript();
+  const body = document.body;
+  const header = document.querySelector("header");
+  const loginCard = document.getElementById("login-card");
+  const registerCard = document.getElementById("register-card");
+  const streamCard = document.getElementById("stream-card");
+  const footer = document.querySelector("footer");
+  const overlay = document.querySelector(".control-overlay");
+  const hudEl = document.querySelector(".hud");
+
+  if (header) header.style.display = "none";
+  if (loginCard) loginCard.style.display = "none";
+  if (registerCard) registerCard.style.display = "none";
+  if (footer) footer.style.display = "none";
+  if (streamCard) streamCard.style.display = "none";
+  if (overlay) overlay.style.display = "none";
+  if (hudEl) hudEl.style.display = "none";
+
+  let vrWrap = document.getElementById("vr-sbs-wrap");
+  if (!vrWrap) {
+    vrWrap = document.createElement("div");
+    vrWrap.id = "vr-sbs-wrap";
+    Object.assign(vrWrap.style, {
+      display: "flex",
+      flexDirection: "row",
+      width: "100vw",
+      height: "100vh",
+      position: "fixed",
+      top: "0",
+      left: "0",
+      zIndex: "9999",
+      background: "black",
+    });
+
+    vrLeftPlayer = createGo2RTCPlayer(GO2RTC_STREAM_VR);
+    vrRightPlayer = createGo2RTCPlayer(GO2RTC_STREAM_PRIMARY);
+
+    [vrLeftPlayer, vrRightPlayer].forEach((p) => {
+      p.style.width = "50%";
+      p.style.height = "100%";
+      p.style.display = "block";
+    });
+
+    vrWrap.appendChild(vrLeftPlayer);
+    vrWrap.appendChild(vrRightPlayer);
+
+    const exitBtn = document.createElement("button");
+    exitBtn.textContent = "🚪";
+    exitBtn.title = "VR verlassen";
+    exitBtn.className = "overlay-btn vr-exit";
+    Object.assign(exitBtn.style, {
+      position: "absolute",
+      top: "20px",
+      right: "20px",
+      zIndex: "10000"
+    });
+    exitBtn.onclick = () => toggleView();
+    vrWrap.appendChild(exitBtn);
+
+    document.body.appendChild(vrWrap);
+  }
+
+  body.classList.add("vr-active");
+  vrWrap.style.display = "flex";
+  if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
+
+  setTimeout(() => attachFpsMonitor(vrRightPlayer), 600);
 }
 
 // Verbindung zu go2rtc-Stream aufbauen
@@ -486,10 +611,13 @@ async function start({ vr = false } = {}) {
   resetStreams();
   try {
     if (vr) {
-      showFeedback("VR-Modus ist im go2rtc-Stream deaktiviert.", "error");
+      await startGo2RTCVR();
+      statusTxt.textContent = "👓 VR verbunden!";
+    } else {
+      await startGo2RTC();
+      statusTxt.textContent = "✅ Verbunden!";
     }
-    await startGo2RTC();
-    statusTxt.textContent = "✅ Verbunden!";
+    monitorPing();
   } catch {
     statusTxt.textContent = "⚠️ Stream-Fehler!";
   } finally {
@@ -509,6 +637,7 @@ function createOverlay() {
   overlay.innerHTML = `
     <button class="overlay-btn" title="Neu verbinden" onclick="restartStream()">🔄</button>
     <button class="overlay-btn" title="Vollbild" onclick="toggleFullscreen()">🖥️</button>
+    <button class="overlay-btn" title="VR-Modus" onclick="toggleView()">👓</button>
     ${isAdmin ? `<button class="overlay-btn" title="Benutzerverwaltung" onclick="openAdminPanel()">🛠️</button>` : ""}
     <button class="overlay-btn" title="Abmelden" onclick="logoutUser()">🚪</button>
   `;
@@ -560,6 +689,14 @@ function updateHudDisplay() {
 // Ping-Messung über WebRTC-Statistiken
 function monitorPing(pc) {
   if (pingTimer) clearInterval(pingTimer);
+  pingTimer = setInterval(async () => {
+    const t0 = performance.now();
+    try {
+      await fetch("/ping", { cache: "no-store" });
+      const ms = (performance.now() - t0).toFixed(1);
+      updateHud(`📡 ${ms} ms`);
+    } catch {}
+  }, 1000);
 }
 
 // FPS-Messung des Videostreams
@@ -605,7 +742,38 @@ function monitorFPS(videoEl) {
 
 // Schaltet zwischen normaler und VR-Ansicht
 async function toggleView() {
-  showFeedback("VR-Modus ist im go2rtc-Stream deaktiviert.", "error");
+  if (connecting) return;
+  vrMode = !vrMode;
+
+  const body = document.body;
+  const header = document.querySelector("header");
+  const loginCard = document.getElementById("login-card");
+  const registerCard = document.getElementById("register-card");
+  const streamCard = document.getElementById("stream-card");
+  const footer = document.querySelector("footer");
+  const overlay = document.querySelector(".control-overlay");
+  const hudEl = document.querySelector(".hud");
+
+  if (vrMode) {
+    await stopConnection();
+    await start({ vr: true });
+  } else {
+    body.classList.remove("vr-active");
+    const wrap = document.getElementById("vr-sbs-wrap");
+    if (wrap) wrap.remove();
+
+    if (header) header.style.display = "";
+    if (loginCard) loginCard.style.display = "none";
+    if (registerCard) registerCard.style.display = "none";
+    if (footer) footer.style.display = "";
+    if (streamCard) streamCard.style.display = "block";
+    if (overlay) overlay.style.display = "";
+    if (hudEl) hudEl.style.display = "";
+
+    document.exitFullscreen?.().catch(() => {});
+    await stopConnection();
+    await start({ vr: false });
+  }
 }
 
 /* =====================================================
@@ -614,7 +782,10 @@ async function toggleView() {
 
 // Vollbildmodus aktivieren
 function toggleFullscreen() {
-  const target = document.getElementById("go2rtc-frame") || document.getElementById("player-wrap");
+  const target =
+    document.getElementById("vr-sbs-wrap") ||
+    go2rtcPlayer ||
+    document.getElementById("player-wrap");
   if (!target) return;
   if (target.requestFullscreen) target.requestFullscreen();
   else if (target.webkitRequestFullscreen) target.webkitRequestFullscreen();
