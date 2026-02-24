@@ -116,6 +116,8 @@ def _camera_worker(
     use_all_cores: bool,
     pixel_format: str,
     swap_rb: bool,
+    color_convert: str,
+    test_pattern: bool,
     buffer_count: int,
     queue: bool,
     lock: mp.Lock,
@@ -123,6 +125,56 @@ def _camera_worker(
 ):
     if use_all_cores:
         MotionCameraStream._configure_cv_threads()
+
+    color_convert = (color_convert or "auto").lower()
+    pixel_format_upper = (pixel_format or "RGB888").upper()
+
+    shm = SharedMemory(name=shm_name)
+    shared_frame = np.ndarray((height, width, 3), dtype=np.uint8, buffer=shm.buf)
+
+    def _convert_frame(frame: np.ndarray) -> np.ndarray:
+        if color_convert == "auto":
+            if frame.ndim == 2:
+                frame = cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_I420)
+            elif frame.shape[2] == 4:
+                if pixel_format_upper.startswith("XBGR") or pixel_format_upper.startswith("BGRA"):
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+                else:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+            elif swap_rb:
+                frame = frame[:, :, ::-1]
+            return frame
+        if color_convert == "none":
+            if swap_rb:
+                frame = frame[:, :, ::-1]
+            return frame
+        if color_convert == "rgb2bgr" or color_convert == "bgr2rgb":
+            return frame[:, :, ::-1]
+        if color_convert == "rgba2bgr":
+            return cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+        if color_convert == "bgra2bgr":
+            return cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+        if color_convert == "yuv420":
+            return cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_I420)
+        if swap_rb:
+            return frame[:, :, ::-1]
+        return frame
+
+    if test_pattern:
+        bars = np.zeros((height, width, 3), dtype=np.uint8)
+        bar_w = max(1, width // 6)
+        bars[:, 0:bar_w] = (255, 0, 0)      # BGR: Blue
+        bars[:, bar_w:bar_w*2] = (0, 255, 0)  # Green
+        bars[:, bar_w*2:bar_w*3] = (0, 0, 255)  # Red
+        bars[:, bar_w*3:bar_w*4] = (255, 255, 255)
+        bars[:, bar_w*4:bar_w*5] = (128, 128, 128)
+        bars[:, bar_w*5:] = (0, 0, 0)
+        while not stop_event.is_set():
+            with lock:
+                np.copyto(shared_frame, bars)
+            time.sleep(0.05)
+        shm.close()
+        return
 
     picam = MotionCameraStream._open_camera(camera_index)
     controls = {"AwbEnable": True, "AeEnable": True}
@@ -138,20 +190,14 @@ def _camera_worker(
     picam.configure(config)
     picam.start()
 
-    shm = SharedMemory(name=shm_name)
-    shared_frame = np.ndarray((height, width, 3), dtype=np.uint8, buffer=shm.buf)
-
     try:
         while not stop_event.is_set():
             frame = picam.capture_array()
             if frame.shape[0] != height or frame.shape[1] != width:
                 frame = cv2.resize(frame, (width, height))
-            if swap_rb:
-                with lock:
-                    np.copyto(shared_frame, frame[:, :, ::-1])
-            else:
-                with lock:
-                    np.copyto(shared_frame, frame)
+            frame = _convert_frame(frame)
+            with lock:
+                np.copyto(shared_frame, frame)
     finally:
         try:
             picam.stop()
@@ -170,6 +216,8 @@ class CameraProcess:
         pixel_format: str = "RGB888",
         frame_format: str = "rgb24",
         swap_rb: bool = False,
+        color_convert: str = "auto",
+        test_pattern: bool = False,
         buffer_count: int = 2,
         queue: bool = False,
         mp_context: Optional[mp.context.BaseContext] = None,
@@ -191,6 +239,8 @@ class CameraProcess:
                 use_all_cores,
                 pixel_format,
                 swap_rb,
+                color_convert,
+                test_pattern,
                 buffer_count,
                 queue,
                 self._lock,

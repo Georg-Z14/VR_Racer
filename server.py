@@ -53,6 +53,8 @@ CAMERA_BUFFER_COUNT = int(os.getenv("CAMERA_BUFFER_COUNT", "2"))
 CAMERA_QUEUE = _parse_bool(os.getenv("CAMERA_QUEUE", "0"), False)
 CAMERA_PIXEL_FORMAT = os.getenv("CAMERA_FORMAT", "RGB888")
 CAMERA_FRAME_FORMAT = os.getenv("VIDEO_FRAME_FORMAT", "rgb24")
+CAMERA_COLOR_CONVERT = os.getenv("CAMERA_COLOR_CONVERT", "auto")
+CAMERA_TEST_PATTERN = _parse_bool(os.getenv("CAMERA_TEST_PATTERN", "0"), False)
 
 
 class CameraManager:
@@ -67,7 +69,8 @@ class CameraManager:
             f"🎥 Camera cfg: size={target_size[0]}x{target_size[1]} "
             f"fmt={CAMERA_PIXEL_FORMAT} frame={CAMERA_FRAME_FORMAT} "
             f"swap_rb={int(CAMERA_SWAP_RB)} buffers={CAMERA_BUFFER_COUNT} "
-            f"queue={int(CAMERA_QUEUE)} max_fps={CAMERA_MAX_FPS}"
+            f"queue={int(CAMERA_QUEUE)} max_fps={CAMERA_MAX_FPS} "
+            f"convert={CAMERA_COLOR_CONVERT} test={int(CAMERA_TEST_PATTERN)}"
         )
         self.camera1_proc = CameraProcess(
             camera_index=0,
@@ -77,6 +80,8 @@ class CameraManager:
             pixel_format=CAMERA_PIXEL_FORMAT,
             frame_format=CAMERA_FRAME_FORMAT,
             swap_rb=CAMERA_SWAP_RB,
+            color_convert=CAMERA_COLOR_CONVERT,
+            test_pattern=CAMERA_TEST_PATTERN,
             buffer_count=CAMERA_BUFFER_COUNT,
             queue=CAMERA_QUEUE,
         )
@@ -96,6 +101,8 @@ class CameraManager:
                     pixel_format=CAMERA_PIXEL_FORMAT,
                     frame_format=CAMERA_FRAME_FORMAT,
                     swap_rb=CAMERA_SWAP_RB,
+                    color_convert=CAMERA_COLOR_CONVERT,
+                    test_pattern=CAMERA_TEST_PATTERN,
                     buffer_count=CAMERA_BUFFER_COUNT,
                     queue=CAMERA_QUEUE,
                 )
