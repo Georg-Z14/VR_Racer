@@ -25,7 +25,7 @@ let hudFps  = "🎥 -- FPS";     // Frames pro Sekunde
 // go2rtc-Settings
 const GO2RTC_STREAM_PRIMARY = "cam_r"; // Rechte Kamera (Standard)
 const GO2RTC_STREAM_VR = "cam_l";      // Linke Kamera (nur im VR-Modus)
-const GO2RTC_PORT = 1984;
+const GO2RTC_PREFIX = "/go2rtc";
 
 /* =====================================================
    🔑 LOGIN / REGISTRIERUNG (JWT)
@@ -484,8 +484,7 @@ function loadGo2RTCScript() {
   return new Promise((resolve, reject) => {
     if (go2rtcScriptLoaded) return resolve();
     const script = document.createElement("script");
-    const scheme = location.protocol === "https:" ? "https" : "http";
-    script.src = `${scheme}://${location.hostname}:${GO2RTC_PORT}/video-rtc.js`;
+    script.src = `${GO2RTC_PREFIX}/video-rtc.js`;
     script.onload = () => {
       go2rtcScriptLoaded = true;
       resolve();
@@ -503,7 +502,7 @@ function createGo2RTCPlayer(streamName) {
   player.style.width = "100%";
   player.style.height = "100%";
   const wsScheme = location.protocol === "https:" ? "wss" : "ws";
-  const wsUrl = `${wsScheme}://${location.hostname}:${GO2RTC_PORT}/api/ws?src=${streamName}`;
+  const wsUrl = `${wsScheme}://${location.host}${GO2RTC_PREFIX}/api/ws?src=${streamName}`;
   player.setAttribute("src", wsUrl);
   return player;
 }
