@@ -4,7 +4,8 @@ let vrMode = false;           // Gibt an, ob der VR-Modus aktiv ist
 let overlayTimeout;           // Timeout für Overlay-Anzeigen
 let currentStream = null;     // Aktueller Video-Stream (WebRTC)
 let rightStream = null;       // Zweiter Video-Stream (VR rechts)
-let pc;                       // RTCPeerConnection-Objekt (WebRTC-Verbindung)
+let pc;                       // RTCPeerConnection-Objekt (nicht genutzt im go2rtc-Modus)
+let go2rtcPlayer = null;
 let isAdmin = false;          // Benutzerrolle (Admin oder normaler Nutzer)
 let token = null;             // JWT-Token für Login-Sitzung
 let tokenExpiry = null;       // Zeitpunkt, wann der Token abläuft
@@ -17,6 +18,10 @@ let connecting = false;
 let hudTimer = "⏰ --:--";     // Zeigt verbleibende Login-Zeit
 let hudPing = "📡 -- ms";      // Netzwerkverzögerung
 let hudFps  = "🎥 -- FPS";     // Frames pro Sekunde
+
+// go2rtc-Settings
+const GO2RTC_STREAM = "cam";
+const GO2RTC_PORT = 1984;
 
 /* =====================================================
    🔑 LOGIN / REGISTRIERUNG (JWT)
@@ -443,69 +448,48 @@ document.addEventListener("DOMContentLoaded", () => {
    STREAM / HUD / VR-STEUERUNG
 ===================================================== */
 
-const video = document.getElementById("video");   // Videotag
 const statusTxt = document.getElementById("status"); // Statusanzeige
 
 function resetStreams() {
   currentStream = null;
   rightStream = null;
-  if (video) video.srcObject = null;
+  if (go2rtcPlayer) {
+    go2rtcPlayer.remove();
+    go2rtcPlayer = null;
+  }
 }
 
-// Verbindung zu WebRTC-Server aufbauen
+async function startGo2RTC() {
+  const wrap = document.getElementById("player-wrap");
+  if (!wrap) throw new Error("player wrap missing");
+
+  go2rtcPlayer = document.createElement("iframe");
+  go2rtcPlayer.id = "go2rtc-frame";
+  go2rtcPlayer.setAttribute("allow", "autoplay; fullscreen");
+  go2rtcPlayer.setAttribute("allowfullscreen", "");
+  go2rtcPlayer.style.border = "0";
+  go2rtcPlayer.style.width = "100%";
+  go2rtcPlayer.style.height = "100%";
+
+  const scheme = location.protocol === "https:" ? "https" : "http";
+  go2rtcPlayer.src = `${scheme}://${location.hostname}:${GO2RTC_PORT}/stream.html?src=${GO2RTC_STREAM}`;
+
+  wrap.innerHTML = "";
+  wrap.appendChild(go2rtcPlayer);
+}
+
+// Verbindung zu go2rtc-Stream aufbauen
 async function start({ vr = false } = {}) {
   if (connecting) return;
   connecting = true;
   statusTxt.textContent = "🔄 Verbinde...";
   resetStreams();
   try {
-    pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] }); // Google STUN-Server
-    pc.addTransceiver("video", { direction: "recvonly" }); // Linke Kamera
-    if (vr) pc.addTransceiver("video", { direction: "recvonly" }); // Rechte Kamera (VR)
-
-    // Wenn Videostream eintrifft
-    pc.ontrack = (event) => {
-      if (event.track.kind !== "video") return;
-
-      if (!currentStream) {
-        currentStream = new MediaStream([event.track]);
-        video.srcObject = currentStream;
-        if (!fpsMonitorStarted) {
-          monitorFPS(video);
-          fpsMonitorStarted = true;
-        }
-        createOverlay();    // Steuer-Overlay anzeigen
-      } else if (!rightStream) {
-        rightStream = new MediaStream([event.track]);
-      }
-      updateVrSources();
-    };
-
-    // WebRTC-Handshake
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    const res = await fetch("/offer", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        sdp: pc.localDescription.sdp,
-        type: pc.localDescription.type,
-        vr
-      })
-    });
-
-    if (!res.ok) {
-      statusTxt.textContent = "❌ Zugriff verweigert!";
-      return;
+    if (vr) {
+      showFeedback("VR-Modus ist im go2rtc-Stream deaktiviert.", "error");
     }
-
-    const answer = await res.json();
-    await pc.setRemoteDescription(answer);
-    statusTxt.textContent = vr ? "✅ VR verbunden!" : "✅ Verbunden!";
-    monitorPing(pc); // Ping messen
+    await startGo2RTC();
+    statusTxt.textContent = "✅ Verbunden!";
   } catch {
     statusTxt.textContent = "⚠️ Stream-Fehler!";
   } finally {
@@ -525,7 +509,6 @@ function createOverlay() {
   overlay.innerHTML = `
     <button class="overlay-btn" title="Neu verbinden" onclick="restartStream()">🔄</button>
     <button class="overlay-btn" title="Vollbild" onclick="toggleFullscreen()">🖥️</button>
-    <button class="overlay-btn" title="VR-Modus" onclick="toggleView()">👓</button>
     ${isAdmin ? `<button class="overlay-btn" title="Benutzerverwaltung" onclick="openAdminPanel()">🛠️</button>` : ""}
     <button class="overlay-btn" title="Abmelden" onclick="logoutUser()">🚪</button>
   `;
@@ -542,6 +525,7 @@ async function stopConnection() {
   }
   if (currentStream) currentStream.getTracks().forEach(t => t.stop());
   if (rightStream) rightStream.getTracks().forEach(t => t.stop());
+  if (pingTimer) clearInterval(pingTimer);
   resetStreams();
 }
 
@@ -552,10 +536,7 @@ async function switchStreamMode(vr) {
 }
 
 function updateVrSources() {
-  const left = document.getElementById("vr-left");
-  const right = document.getElementById("vr-right");
-  if (left && currentStream) left.srcObject = currentStream;
-  if (right && rightStream) right.srcObject = rightStream;
+  // VR deaktiviert im go2rtc-Modus
 }
 
 /* =====================================================
@@ -579,17 +560,6 @@ function updateHudDisplay() {
 // Ping-Messung über WebRTC-Statistiken
 function monitorPing(pc) {
   if (pingTimer) clearInterval(pingTimer);
-  pingTimer = setInterval(async () => {
-    try {
-      const stats = await pc.getStats();
-      let rtt = null;
-      stats.forEach(report => {
-        if (report.type === "candidate-pair" && report.state === "succeeded" && report.currentRoundTripTime)
-          rtt = (report.currentRoundTripTime * 1000).toFixed(1);
-      });
-      if (rtt) updateHud(`📡 ${rtt} ms`);
-    } catch {}
-  }, 1000);
 }
 
 // FPS-Messung des Videostreams
@@ -635,108 +605,7 @@ function monitorFPS(videoEl) {
 
 // Schaltet zwischen normaler und VR-Ansicht
 async function toggleView() {
-  vrMode = !vrMode; // Zustand umschalten
-  const body = document.body;
-  const header = document.querySelector("header");
-  const loginCard = document.getElementById("login-card");
-  const registerCard = document.getElementById("register-card");
-  const streamCard = document.getElementById("stream-card");
-  const footer = document.querySelector("footer");
-  const overlay = document.querySelector(".control-overlay");
-  const hudEl = document.querySelector(".hud");
-  let vrWrap = document.getElementById("vr-sbs-wrap");
-
-  if (vrMode) {
-    await switchStreamMode(true);
-
-    // Alles ausblenden außer VR-Ansicht
-    if (header) header.style.display = "none";
-    if (loginCard) loginCard.style.display = "none";
-    if (registerCard) registerCard.style.display = "none";
-    if (footer) footer.style.display = "none";
-    if (streamCard) streamCard.style.display = "none";
-    if (overlay) overlay.style.display = "none";
-    if (hudEl) hudEl.style.display = "none";
-
-    // VR-Container erzeugen (Side-by-Side)
-    if (!vrWrap) {
-      vrWrap = document.createElement("div");
-      vrWrap.id = "vr-sbs-wrap";
-      Object.assign(vrWrap.style, {
-        display: "flex",
-        flexDirection: "row",
-        width: "100vw",
-        height: "100vh",
-        position: "fixed",
-        top: "0",
-        left: "0",
-        zIndex: "9999",
-        background: "black",
-      });
-      // Zwei Videofenster (links/rechts)
-      const left = document.createElement("video");
-      const right = document.createElement("video");
-      left.id = "vr-left";
-      right.id = "vr-right";
-
-      [left, right].forEach((v) => {
-        v.autoplay = true;
-        v.playsInline = true;
-        v.muted = true;
-        v.style.width = "50%";
-        v.style.height = "100%";
-        v.style.objectFit = "cover";
-        v.style.background = "black";
-        v.style.transform = "translateZ(0)"; // verhindert Repaint-Delay (iOS Safari Bugfix)
-      });
-
-      vrWrap.appendChild(left);
-      vrWrap.appendChild(right);
-
-      // Exit-Button oben rechts
-      const exitBtn = document.createElement("button");
-      exitBtn.textContent = "🚪";
-      exitBtn.title = "VR verlassen";
-      exitBtn.className = "overlay-btn vr-exit";
-      Object.assign(exitBtn.style, {
-        position: "absolute",
-        top: "20px",
-        right: "20px",
-        zIndex: "10000"
-      });
-      exitBtn.onclick = () => toggleView(); // Zurückschalten
-      vrWrap.appendChild(exitBtn);
-
-      document.body.appendChild(vrWrap);
-    }
-
-    updateVrSources();
-    vrWrap.style.display = "flex";
-    body.classList.add("vr-active");
-    if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
-    statusTxt.textContent = "👓 VR-Modus aktiv";
-
-    setTimeout(() => {
-      if (vrMode && !rightStream) {
-        statusTxt.textContent = "⚠️ VR-Kamera nicht verfügbar";
-      }
-    }, 2000);
-  } else {
-    // Rückkehr zur normalen Ansicht
-    body.classList.remove("vr-active");
-    const wrap = document.getElementById("vr-sbs-wrap");
-    if (wrap) wrap.remove();
-
-    if (header) header.style.display = "";
-    if (footer) footer.style.display = "";
-    if (streamCard) streamCard.style.display = "block";
-    if (overlay) overlay.style.display = "";
-    if (hudEl) hudEl.style.display = "";
-
-    document.exitFullscreen?.().catch(() => {});
-    await switchStreamMode(false);
-    statusTxt.textContent = "🖥 Normal-Modus";
-  }
+  showFeedback("VR-Modus ist im go2rtc-Stream deaktiviert.", "error");
 }
 
 /* =====================================================
@@ -745,8 +614,10 @@ async function toggleView() {
 
 // Vollbildmodus aktivieren
 function toggleFullscreen() {
-  if (video.requestFullscreen) video.requestFullscreen();
-  else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
+  const target = document.getElementById("go2rtc-frame") || document.getElementById("player-wrap");
+  if (!target) return;
+  if (target.requestFullscreen) target.requestFullscreen();
+  else if (target.webkitRequestFullscreen) target.webkitRequestFullscreen();
 }
 
 // Seite neu laden (z. B. bei Streamfehler)
