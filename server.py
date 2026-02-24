@@ -16,7 +16,7 @@ from typing import List, Dict, Optional
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaRelay
-from camera_stream import MotionCameraStream
+from camera_stream import CameraProcess
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
@@ -30,6 +30,26 @@ relay = MediaRelay()
 camera_manager = None
 
 
+def _parse_size(raw: str, default=(1280, 720)):
+    try:
+        w, h = raw.lower().split("x", 1)
+        return int(w), int(h)
+    except Exception:
+        return default
+
+
+def _parse_bool(raw: str, default: bool = True) -> bool:
+    if raw is None:
+        return default
+    return raw.lower() not in ("0", "false", "no", "off")
+
+
+CAMERA_SIZE = _parse_size(os.getenv("CAMERA_SIZE", "1280x720"))
+CAMERA_MAX_FPS = os.getenv("CAMERA_MAX_FPS")
+CAMERA_MAX_FPS = float(CAMERA_MAX_FPS) if CAMERA_MAX_FPS else None
+CAMERA_USE_ALL_CORES = _parse_bool(os.getenv("CAMERA_USE_ALL_CORES", "1"), True)
+
+
 class CameraManager:
     def __init__(self, relay: MediaRelay, target_size=(1280, 720), sensitivity=40):
         self._relay = relay
@@ -37,38 +57,57 @@ class CameraManager:
         self._sensitivity = sensitivity
         self._lock = threading.Lock()
         self._vr_clients = 0
-        self.camera1 = MotionCameraStream(camera_index=0, target_size=target_size, sensitivity=sensitivity)
-        self.camera2 = None
+
+        self.camera1_proc = CameraProcess(
+            camera_index=0,
+            target_size=target_size,
+            max_fps=CAMERA_MAX_FPS,
+            use_all_cores=CAMERA_USE_ALL_CORES,
+        )
+        self.camera1_track = self.camera1_proc.create_track()
+
+        self.camera2_proc = None
+        self.camera2_track = None
 
     def acquire_vr(self):
         with self._lock:
-            if self.camera2 is None:
-                self.camera2 = MotionCameraStream(camera_index=1, target_size=self._target_size,
-                                                  sensitivity=self._sensitivity)
+            if self.camera2_proc is None:
+                self.camera2_proc = CameraProcess(
+                    camera_index=1,
+                    target_size=self._target_size,
+                    max_fps=CAMERA_MAX_FPS,
+                    use_all_cores=CAMERA_USE_ALL_CORES,
+                )
+                self.camera2_track = self.camera2_proc.create_track()
             self._vr_clients += 1
 
     def release_vr(self):
         with self._lock:
             if self._vr_clients > 0:
                 self._vr_clients -= 1
-            if self._vr_clients == 0 and self.camera2:
-                self.camera2.stop()
-                self.camera2 = None
+            if self._vr_clients == 0:
+                if self.camera2_proc:
+                    self.camera2_proc.stop()
+                    self.camera2_proc = None
+                    self.camera2_track = None
 
     def get_tracks(self, vr_mode: bool):
-        track_left = self._relay.subscribe(self.camera1)
+        track_left = self._relay.subscribe(self.camera1_track)
         if not vr_mode:
             return [track_left]
-        if self.camera2 is None:
+        if self.camera2_track is None:
             raise RuntimeError("Kamera 2 ist nicht verfügbar")
-        track_right = self._relay.subscribe(self.camera2)
+        track_right = self._relay.subscribe(self.camera2_track)
         return [track_left, track_right]
 
     def stop_all(self):
-        self.camera1.stop()
-        if self.camera2:
-            self.camera2.stop()
-            self.camera2 = None
+        if self.camera1_proc:
+            self.camera1_proc.stop()
+            self.camera1_proc = None
+        if self.camera2_proc:
+            self.camera2_proc.stop()
+            self.camera2_proc = None
+        self.camera2_track = None
 
 
 
@@ -123,6 +162,10 @@ def ensure_is_admin_column(c: sqlite3.Cursor):
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+    try:
+        c.execute("PRAGMA journal_mode=WAL")
+    except Exception:
+        pass
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -462,7 +505,7 @@ def create_app() -> web.Application:
     global camera_manager
     init_db()
     if camera_manager is None:
-        camera_manager = CameraManager(relay, target_size=(1280, 720))
+        camera_manager = CameraManager(relay, target_size=CAMERA_SIZE)
     app = web.Application()
     app.router.add_get("/", index)
     app.router.add_get("/dashboard", dashboard)
