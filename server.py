@@ -48,6 +48,9 @@ CAMERA_SIZE = _parse_size(os.getenv("CAMERA_SIZE", "1280x720"))
 CAMERA_MAX_FPS = os.getenv("CAMERA_MAX_FPS")
 CAMERA_MAX_FPS = float(CAMERA_MAX_FPS) if CAMERA_MAX_FPS else None
 CAMERA_USE_ALL_CORES = _parse_bool(os.getenv("CAMERA_USE_ALL_CORES", "1"), True)
+CAMERA_SWAP_RB = _parse_bool(os.getenv("CAMERA_SWAP_RB", "0"), False)
+CAMERA_BUFFER_COUNT = int(os.getenv("CAMERA_BUFFER_COUNT", "2"))
+CAMERA_QUEUE = _parse_bool(os.getenv("CAMERA_QUEUE", "0"), False)
 
 
 class CameraManager:
@@ -63,6 +66,9 @@ class CameraManager:
             target_size=target_size,
             max_fps=CAMERA_MAX_FPS,
             use_all_cores=CAMERA_USE_ALL_CORES,
+            swap_rb=CAMERA_SWAP_RB,
+            buffer_count=CAMERA_BUFFER_COUNT,
+            queue=CAMERA_QUEUE,
         )
         self.camera1_track = self.camera1_proc.create_track()
 
@@ -77,6 +83,9 @@ class CameraManager:
                     target_size=self._target_size,
                     max_fps=CAMERA_MAX_FPS,
                     use_all_cores=CAMERA_USE_ALL_CORES,
+                    swap_rb=CAMERA_SWAP_RB,
+                    buffer_count=CAMERA_BUFFER_COUNT,
+                    queue=CAMERA_QUEUE,
                 )
                 self.camera2_track = self.camera2_proc.create_track()
             self._vr_clients += 1

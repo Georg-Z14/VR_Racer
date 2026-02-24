@@ -114,6 +114,9 @@ def _camera_worker(
     camera_index: int,
     max_fps: float,
     use_all_cores: bool,
+    swap_rb: bool,
+    buffer_count: int,
+    queue: bool,
     lock: mp.Lock,
     stop_event: mp.Event,
 ):
@@ -121,9 +124,15 @@ def _camera_worker(
         MotionCameraStream._configure_cv_threads()
 
     picam = MotionCameraStream._open_camera(camera_index)
+    controls = {"AwbEnable": True, "AeEnable": True}
+    if max_fps and max_fps > 0:
+        controls["FrameRate"] = max_fps
+
     config = picam.create_video_configuration(
         main={"size": (width, height), "format": "RGB888"},
-        controls={"AwbEnable": True, "AeEnable": True},
+        controls=controls,
+        buffer_count=buffer_count,
+        queue=queue,
     )
     picam.configure(config)
     picam.start()
@@ -140,6 +149,8 @@ def _camera_worker(
     try:
         while not stop_event.is_set():
             frame = picam.capture_array()
+            if swap_rb:
+                frame = frame[:, :, ::-1].copy()
             if frame.shape[0] != height or frame.shape[1] != width:
                 frame = cv2.resize(frame, (width, height))
             with lock:
@@ -165,6 +176,9 @@ class CameraProcess:
         target_size=(1280, 720),
         max_fps=None,
         use_all_cores=True,
+        swap_rb: bool = False,
+        buffer_count: int = 2,
+        queue: bool = False,
         mp_context: Optional[mp.context.BaseContext] = None,
     ):
         self._width, self._height = target_size
@@ -181,6 +195,9 @@ class CameraProcess:
                 camera_index,
                 max_fps,
                 use_all_cores,
+                swap_rb,
+                buffer_count,
+                queue,
                 self._lock,
                 self._stop_event,
             ),
