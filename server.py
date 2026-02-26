@@ -56,6 +56,8 @@ CAMERA_PIXEL_FORMAT = os.getenv("CAMERA_FORMAT", "RGB888")
 CAMERA_FRAME_FORMAT = os.getenv("VIDEO_FRAME_FORMAT", "rgb24")
 CAMERA_COLOR_CONVERT = os.getenv("CAMERA_COLOR_CONVERT", "auto")
 CAMERA_TEST_PATTERN = _parse_bool(os.getenv("CAMERA_TEST_PATTERN", "0"), False)
+CAMERA_RIGHT_INDEX = int(os.getenv("CAMERA_RIGHT_INDEX", "0"))
+CAMERA_LEFT_INDEX = int(os.getenv("CAMERA_LEFT_INDEX", "1"))
 
 
 class CameraManager:
@@ -71,10 +73,11 @@ class CameraManager:
             f"fmt={CAMERA_PIXEL_FORMAT} frame={CAMERA_FRAME_FORMAT} "
             f"swap_rb={int(CAMERA_SWAP_RB)} buffers={CAMERA_BUFFER_COUNT} "
             f"queue={int(CAMERA_QUEUE)} max_fps={CAMERA_MAX_FPS} "
-            f"convert={CAMERA_COLOR_CONVERT} test={int(CAMERA_TEST_PATTERN)}"
+            f"convert={CAMERA_COLOR_CONVERT} test={int(CAMERA_TEST_PATTERN)} "
+            f"right_idx={CAMERA_RIGHT_INDEX} left_idx={CAMERA_LEFT_INDEX}"
         )
-        self.camera1_proc = CameraProcess(
-            camera_index=0,
+        self.camera_right_proc = CameraProcess(
+            camera_index=CAMERA_RIGHT_INDEX,
             target_size=target_size,
             max_fps=CAMERA_MAX_FPS,
             use_all_cores=CAMERA_USE_ALL_CORES,
@@ -86,16 +89,16 @@ class CameraManager:
             buffer_count=CAMERA_BUFFER_COUNT,
             queue=CAMERA_QUEUE,
         )
-        self.camera1_track = self.camera1_proc.create_track()
+        self.camera_right_track = self.camera_right_proc.create_track()
 
-        self.camera2_proc = None
-        self.camera2_track = None
+        self.camera_left_proc = None
+        self.camera_left_track = None
 
     def acquire_vr(self):
         with self._lock:
-            if self.camera2_proc is None:
-                self.camera2_proc = CameraProcess(
-                    camera_index=1,
+            if self.camera_left_proc is None:
+                self.camera_left_proc = CameraProcess(
+                    camera_index=CAMERA_LEFT_INDEX,
                     target_size=self._target_size,
                     max_fps=CAMERA_MAX_FPS,
                     use_all_cores=CAMERA_USE_ALL_CORES,
@@ -107,7 +110,7 @@ class CameraManager:
                     buffer_count=CAMERA_BUFFER_COUNT,
                     queue=CAMERA_QUEUE,
                 )
-                self.camera2_track = self.camera2_proc.create_track()
+                self.camera_left_track = self.camera_left_proc.create_track()
             self._vr_clients += 1
 
     def release_vr(self):
@@ -115,28 +118,28 @@ class CameraManager:
             if self._vr_clients > 0:
                 self._vr_clients -= 1
             if self._vr_clients == 0:
-                if self.camera2_proc:
-                    self.camera2_proc.stop()
-                    self.camera2_proc = None
-                    self.camera2_track = None
+                if self.camera_left_proc:
+                    self.camera_left_proc.stop()
+                    self.camera_left_proc = None
+                    self.camera_left_track = None
 
     def get_tracks(self, vr_mode: bool):
-        track_left = self._relay.subscribe(self.camera1_track)
+        track_right = self._relay.subscribe(self.camera_right_track)
         if not vr_mode:
-            return [track_left]
-        if self.camera2_track is None:
-            raise RuntimeError("Kamera 2 ist nicht verfügbar")
-        track_right = self._relay.subscribe(self.camera2_track)
+            return [track_right]
+        if self.camera_left_track is None:
+            raise RuntimeError("Kamera links ist nicht verfügbar")
+        track_left = self._relay.subscribe(self.camera_left_track)
         return [track_left, track_right]
 
     def stop_all(self):
-        if self.camera1_proc:
-            self.camera1_proc.stop()
-            self.camera1_proc = None
-        if self.camera2_proc:
-            self.camera2_proc.stop()
-            self.camera2_proc = None
-        self.camera2_track = None
+        if self.camera_right_proc:
+            self.camera_right_proc.stop()
+            self.camera_right_proc = None
+        if self.camera_left_proc:
+            self.camera_left_proc.stop()
+            self.camera_left_proc = None
+        self.camera_left_track = None
 
 
 

@@ -3,74 +3,21 @@ let authPassword = null;      // Wird aktuell nicht genutzt, Platzhalter für k�
 let vrMode = false;           // Gibt an, ob der VR-Modus aktiv ist
 let overlayTimeout;           // Timeout für Overlay-Anzeigen
 let currentStream = null;     // Aktueller Video-Stream (WebRTC)
-let rightStream = null;       // Zweiter Video-Stream (VR rechts)
-let pc;                       // RTCPeerConnection-Objekt (nicht genutzt im go2rtc-Modus)
-let go2rtcPlayer = null;
-let vrLeftPlayer = null;
-let vrRightPlayer = null;
-let go2rtcScriptLoaded = false;
+let pc;                       // RTCPeerConnection-Objekt (WebRTC-Verbindung)
 let isAdmin = false;          // Benutzerrolle (Admin oder normaler Nutzer)
 let token = null;             // JWT-Token für Login-Sitzung
 let tokenExpiry = null;       // Zeitpunkt, wann der Token abläuft
 let tokenTimer = null;        // Timer für automatischen Logout bei Ablauf
 let pingTimer = null;         // Ping-Interval
-let fpsMonitorStarted = false;
-let connecting = false;
+let connecting = false;       // Verhindert Doppel-Connects
+let vrStreams = [];           // Streams im VR-Modus (links/rechts)
+let vrLeftVideo = null;
+let vrRightVideo = null;
 
 // HUD-Werte (werden später im Stream angezeigt)
 let hudTimer = "⏰ --:--";     // Zeigt verbleibende Login-Zeit
 let hudPing = "📡 -- ms";      // Netzwerkverzögerung
 let hudFps  = "🎥 -- FPS";     // Frames pro Sekunde
-
-// go2rtc-Settings
-const GO2RTC_STREAM_PRIMARY = "cam_r"; // Rechte Kamera (Standard)
-const GO2RTC_STREAM_VR = "cam_l";      // Linke Kamera (nur im VR-Modus)
-const GO2RTC_BASE =
-  window.GO2RTC_BASE ||
-  document.querySelector('meta[name="go2rtc-base"]')?.content ||
-  document.body?.dataset?.go2rtcBase ||
-  "/go2rtc";
-
-function stripTrailingSlashes(value) {
-  return value.replace(/\/+$/g, "");
-}
-
-function normalizeHttpBase(base) {
-  if (!base || base === "/") return "";
-  return stripTrailingSlashes(base);
-}
-
-function resolveGo2RTCStatic(fileName) {
-  if (GO2RTC_BASE.startsWith("http://") || GO2RTC_BASE.startsWith("https://")) {
-    const base = normalizeHttpBase(GO2RTC_BASE);
-    return `${base}/${fileName}`;
-  }
-  if (GO2RTC_BASE.startsWith("ws://") || GO2RTC_BASE.startsWith("wss://")) {
-    const wsUrl = new URL(GO2RTC_BASE);
-    const httpScheme = wsUrl.protocol === "wss:" ? "https:" : "http:";
-    const path = normalizeHttpBase(wsUrl.pathname);
-    return `${httpScheme}//${wsUrl.host}${path}/${fileName}`;
-  }
-  const path = normalizeHttpBase(GO2RTC_BASE);
-  return `${path}/${fileName}`;
-}
-
-function buildGo2RTCWsUrl(streamName) {
-  const src = encodeURIComponent(streamName);
-  if (GO2RTC_BASE.startsWith("ws://") || GO2RTC_BASE.startsWith("wss://")) {
-    const base = stripTrailingSlashes(GO2RTC_BASE);
-    return `${base}/api/ws?src=${src}`;
-  }
-  if (GO2RTC_BASE.startsWith("http://") || GO2RTC_BASE.startsWith("https://")) {
-    const httpUrl = new URL(GO2RTC_BASE);
-    const wsScheme = httpUrl.protocol === "https:" ? "wss:" : "ws:";
-    const basePath = normalizeHttpBase(httpUrl.pathname);
-    return `${wsScheme}//${httpUrl.host}${basePath}/api/ws?src=${src}`;
-  }
-  const wsScheme = location.protocol === "https:" ? "wss" : "ws";
-  const basePath = normalizeHttpBase(GO2RTC_BASE);
-  return `${wsScheme}://${location.host}${basePath}/api/ws?src=${src}`;
-}
 
 /* =====================================================
    🔑 LOGIN / REGISTRIERUNG (JWT)
@@ -118,14 +65,12 @@ async function login() {
       // Token-Ablauf-Überwachung starten
       scheduleTokenExpiryLogout();
 
-      createOverlay();
-
       // Nach kurzer Zeit zum Stream wechseln
       setTimeout(() => {
         card.style.display = "none";
         document.getElementById("stream-card").style.display = "block";
         hideLoginVideo(); // <— Hintergrundvideo ausblenden
-        start(); // Verbindung aufbauen
+        start({ vr: false }); // Verbindung aufbauen
       }, 600);
     }
     // Login-Daten falsch
@@ -488,203 +433,23 @@ document.addEventListener("DOMContentLoaded", () => {
     hideLoginVideo(); // 🔥 <—— DAS IST NEU
     document.getElementById("login-card").style.display = "none";
     document.getElementById("stream-card").style.display = "block";
-    start(); // Stream starten
+    start({ vr: false }); // Stream starten
   }
-  createOverlay();
 });
 
 /* =====================================================
    STREAM / HUD / VR-STEUERUNG
 ===================================================== */
 
+const video = document.getElementById("video");   // Videotag
 const statusTxt = document.getElementById("status"); // Statusanzeige
 
 function resetStreams() {
   currentStream = null;
-  rightStream = null;
-  if (go2rtcPlayer) {
-    go2rtcPlayer.remove();
-    go2rtcPlayer = null;
-  }
-  if (vrLeftPlayer) {
-    vrLeftPlayer.remove();
-    vrLeftPlayer = null;
-  }
-  if (vrRightPlayer) {
-    vrRightPlayer.remove();
-    vrRightPlayer = null;
-  }
-}
-
-function getVideoFromPlayer(player) {
-  if (!player) return null;
-  if (player.video) return player.video;
-  const direct = player.querySelector("video");
-  if (direct) return direct;
-  const shadow = player.shadowRoot ? player.shadowRoot.querySelector("video") : null;
-  return shadow || null;
-}
-
-function loadGo2RTCScript() {
-  return new Promise((resolve, reject) => {
-    if (go2rtcScriptLoaded) return resolve();
-    const script = document.createElement("script");
-    script.src = resolveGo2RTCStatic("video-rtc.js");
-    script.onload = () => {
-      go2rtcScriptLoaded = true;
-      resolve();
-    };
-    script.onerror = () => reject(new Error("go2rtc script load failed"));
-    document.head.appendChild(script);
-  });
-}
-
-function createGo2RTCPlayer(streamName) {
-  const player = document.createElement("video-rtc");
-  player.setAttribute("autoplay", "");
-  player.setAttribute("playsinline", "");
-  player.setAttribute("muted", "true");
-  player.style.width = "100%";
-  player.style.height = "100%";
-  const wsUrl = buildGo2RTCWsUrl(streamName);
-  player.setAttribute("src", wsUrl);
-  return player;
-}
-
-function attachFpsMonitor(player) {
-  let tries = 0;
-  const timer = setInterval(() => {
-    const vid = getVideoFromPlayer(player);
-    if (vid && !fpsMonitorStarted) {
-      monitorFPS(vid);
-      fpsMonitorStarted = true;
-      clearInterval(timer);
-    }
-    if (++tries > 10) clearInterval(timer);
-  }, 300);
-}
-
-async function startGo2RTC() {
-  await loadGo2RTCScript();
-  const wrap = document.getElementById("player-wrap");
-  if (!wrap) throw new Error("player wrap missing");
-
-  go2rtcPlayer = createGo2RTCPlayer(GO2RTC_STREAM_PRIMARY);
-  wrap.innerHTML = "";
-  wrap.appendChild(go2rtcPlayer);
-
-  setTimeout(() => attachFpsMonitor(go2rtcPlayer), 600);
-}
-
-async function startGo2RTCVR() {
-  await loadGo2RTCScript();
-  const body = document.body;
-  const header = document.querySelector("header");
-  const loginCard = document.getElementById("login-card");
-  const registerCard = document.getElementById("register-card");
-  const streamCard = document.getElementById("stream-card");
-  const footer = document.querySelector("footer");
-  const overlay = document.querySelector(".control-overlay");
-  const hudEl = document.querySelector(".hud");
-
-  if (header) header.style.display = "none";
-  if (loginCard) loginCard.style.display = "none";
-  if (registerCard) registerCard.style.display = "none";
-  if (footer) footer.style.display = "none";
-  if (streamCard) streamCard.style.display = "none";
-  if (overlay) overlay.style.display = "none";
-  if (hudEl) hudEl.style.display = "none";
-
-  let vrWrap = document.getElementById("vr-sbs-wrap");
-  if (!vrWrap) {
-    vrWrap = document.createElement("div");
-    vrWrap.id = "vr-sbs-wrap";
-    Object.assign(vrWrap.style, {
-      display: "flex",
-      flexDirection: "row",
-      width: "100vw",
-      height: "100vh",
-      position: "fixed",
-      top: "0",
-      left: "0",
-      zIndex: "9999",
-      background: "black",
-    });
-
-    vrLeftPlayer = createGo2RTCPlayer(GO2RTC_STREAM_VR);
-    vrRightPlayer = createGo2RTCPlayer(GO2RTC_STREAM_PRIMARY);
-
-    [vrLeftPlayer, vrRightPlayer].forEach((p) => {
-      p.style.width = "50%";
-      p.style.height = "100%";
-      p.style.display = "block";
-    });
-
-    vrWrap.appendChild(vrLeftPlayer);
-    vrWrap.appendChild(vrRightPlayer);
-
-    const exitBtn = document.createElement("button");
-    exitBtn.textContent = "🚪";
-    exitBtn.title = "VR verlassen";
-    exitBtn.className = "overlay-btn vr-exit";
-    Object.assign(exitBtn.style, {
-      position: "absolute",
-      top: "20px",
-      right: "20px",
-      zIndex: "10000"
-    });
-    exitBtn.onclick = () => toggleView();
-    vrWrap.appendChild(exitBtn);
-
-    document.body.appendChild(vrWrap);
-  }
-
-  body.classList.add("vr-active");
-  vrWrap.style.display = "flex";
-  if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
-
-  setTimeout(() => attachFpsMonitor(vrRightPlayer), 600);
-}
-
-// Verbindung zu go2rtc-Stream aufbauen
-async function start({ vr = false } = {}) {
-  if (connecting) return;
-  connecting = true;
-  statusTxt.textContent = "🔄 Verbinde...";
-  resetStreams();
-  try {
-    if (vr) {
-      await startGo2RTCVR();
-      statusTxt.textContent = "👓 VR verbunden!";
-    } else {
-      await startGo2RTC();
-      statusTxt.textContent = "✅ Verbunden!";
-    }
-    monitorPing();
-  } catch {
-    statusTxt.textContent = "⚠️ Stream-Fehler!";
-  } finally {
-    connecting = false;
-  }
-}
-
-// Overlay mit Buttons (Neu laden, VR etc.)
-function createOverlay() {
-  // Entferne altes Overlay, falls vorhanden (wichtig!)
-  const oldOverlay = document.querySelector(".control-overlay");
-  if (oldOverlay) oldOverlay.remove();
-
-  // Neues Overlay erzeugen
-  const overlay = document.createElement("div");
-  overlay.className = "control-overlay";
-  overlay.innerHTML = `
-    <button class="overlay-btn" title="Neu verbinden" onclick="restartStream()">🔄</button>
-    <button class="overlay-btn" title="Vollbild" onclick="toggleFullscreen()">🖥️</button>
-    <button class="overlay-btn" title="VR-Modus" onclick="toggleView()">👓</button>
-    ${isAdmin ? `<button class="overlay-btn" title="Benutzerverwaltung" onclick="openAdminPanel()">🛠️</button>` : ""}
-    <button class="overlay-btn" title="Abmelden" onclick="logoutUser()">🚪</button>
-  `;
-  document.querySelector(".status-bar").appendChild(overlay);
+  vrStreams = [];
+  if (video) video.srcObject = null;
+  if (vrLeftVideo) vrLeftVideo.srcObject = null;
+  if (vrRightVideo) vrRightVideo.srcObject = null;
 }
 
 async function stopConnection() {
@@ -696,19 +461,144 @@ async function stopConnection() {
     pc = null;
   }
   if (currentStream) currentStream.getTracks().forEach(t => t.stop());
-  if (rightStream) rightStream.getTracks().forEach(t => t.stop());
-  if (pingTimer) clearInterval(pingTimer);
+  vrStreams.forEach(s => s.getTracks().forEach(t => t.stop()));
+  if (pingTimer) {
+    clearInterval(pingTimer);
+    pingTimer = null;
+  }
   resetStreams();
 }
 
-async function switchStreamMode(vr) {
-  if (connecting) return;
-  await stopConnection();
-  await start({ vr });
+function ensureVrWrap() {
+  let vrWrap = document.getElementById("vr-sbs-wrap");
+  if (vrWrap) return vrWrap;
+
+  vrWrap = document.createElement("div");
+  vrWrap.id = "vr-sbs-wrap";
+  Object.assign(vrWrap.style, {
+    display: "flex",
+    flexDirection: "row",
+    width: "100vw",
+    height: "100vh",
+    position: "fixed",
+    top: "0",
+    left: "0",
+    zIndex: "9999",
+    background: "black",
+  });
+
+  vrLeftVideo = document.createElement("video");
+  vrRightVideo = document.createElement("video");
+
+  [vrLeftVideo, vrRightVideo].forEach((v) => {
+    v.autoplay = true;
+    v.playsInline = true;
+    v.muted = true;
+    v.style.width = "50%";
+    v.style.height = "100%";
+    v.style.objectFit = "cover";
+    v.style.background = "black";
+    v.style.transform = "translateZ(0)";
+  });
+
+  vrWrap.appendChild(vrLeftVideo);
+  vrWrap.appendChild(vrRightVideo);
+
+  const exitBtn = document.createElement("button");
+  exitBtn.textContent = "🚪";
+  exitBtn.title = "VR verlassen";
+  exitBtn.className = "overlay-btn vr-exit";
+  Object.assign(exitBtn.style, {
+    position: "absolute",
+    top: "20px",
+    right: "20px",
+    zIndex: "10000"
+  });
+  exitBtn.onclick = () => toggleView();
+  vrWrap.appendChild(exitBtn);
+
+  document.body.appendChild(vrWrap);
+  return vrWrap;
 }
 
-function updateVrSources() {
-  // VR deaktiviert im go2rtc-Modus
+function attachVrStreams(leftStream, rightStream) {
+  const vrWrap = ensureVrWrap();
+  vrWrap.style.display = "flex";
+  if (vrLeftVideo) vrLeftVideo.srcObject = leftStream;
+  if (vrRightVideo) vrRightVideo.srcObject = rightStream;
+  if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
+  if (vrRightVideo) monitorFPS(vrRightVideo);
+}
+
+// Verbindung zu WebRTC-Server aufbauen
+async function start({ vr = false } = {}) {
+  if (connecting) return;
+  connecting = true;
+  statusTxt.textContent = "🔄 Verbinde...";
+  resetStreams();
+  try {
+    pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    const recvCount = vr ? 2 : 1;
+    for (let i = 0; i < recvCount; i++) {
+      pc.addTransceiver("video", { direction: "recvonly" });
+    }
+
+    pc.ontrack = (event) => {
+      const stream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
+      if (!vr) {
+        currentStream = stream;
+        video.srcObject = currentStream;
+        monitorFPS(video);
+        createOverlay();
+        return;
+      }
+      vrStreams.push(stream);
+      if (vrStreams.length >= 2) {
+        attachVrStreams(vrStreams[0], vrStreams[1]);
+      }
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    const res = await fetch("/offer", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ ...pc.localDescription, vr })
+    });
+
+    if (!res.ok) {
+      statusTxt.textContent = "❌ Zugriff verweigert!";
+      await stopConnection();
+      return;
+    }
+
+    const answer = await res.json();
+    await pc.setRemoteDescription(answer);
+    statusTxt.textContent = vr ? "👓 VR verbunden!" : "✅ Verbunden!";
+    monitorPing(pc);
+  } catch {
+    statusTxt.textContent = "⚠️ Stream-Fehler!";
+    await stopConnection();
+  } finally {
+    connecting = false;
+  }
+}
+
+// Overlay mit Buttons (Neu laden, VR etc.)
+function createOverlay() {
+  if (document.querySelector(".control-overlay")) return; // Nur einmal erzeugen
+  const overlay = document.createElement("div");
+  overlay.className = "control-overlay";
+  overlay.innerHTML = `
+    <button class="overlay-btn" title="Neu verbinden" onclick="restartStream()">🔄</button>
+    <button class="overlay-btn" title="Vollbild" onclick="toggleFullscreen()">🖥️</button>
+    <button class="overlay-btn" title="VR-Modus" onclick="toggleView()">👓</button>
+    ${isAdmin ? `<button class="overlay-btn" title="Benutzerverwaltung" onclick="openAdminPanel()">🛠️</button>` : ""}
+  `;
+  document.querySelector(".status-bar").appendChild(overlay);
 }
 
 /* =====================================================
@@ -733,11 +623,14 @@ function updateHudDisplay() {
 function monitorPing(pc) {
   if (pingTimer) clearInterval(pingTimer);
   pingTimer = setInterval(async () => {
-    const t0 = performance.now();
     try {
-      await fetch("/ping", { cache: "no-store" });
-      const ms = (performance.now() - t0).toFixed(1);
-      updateHud(`📡 ${ms} ms`);
+      const stats = await pc.getStats();
+      let rtt = null;
+      stats.forEach(report => {
+        if (report.type === "candidate-pair" && report.state === "succeeded" && report.currentRoundTripTime)
+          rtt = (report.currentRoundTripTime * 1000).toFixed(1);
+      });
+      if (rtt) updateHud(`📡 ${rtt} ms`);
     } catch {}
   }, 1000);
 }
@@ -783,11 +676,7 @@ function monitorFPS(videoEl) {
    ✅ VR-VOLLANSICHT (Side-by-Side)
 ===================================================== */
 
-// Schaltet zwischen normaler und VR-Ansicht
-async function toggleView() {
-  if (connecting) return;
-  vrMode = !vrMode;
-
+function enterVrUi() {
   const body = document.body;
   const header = document.querySelector("header");
   const loginCard = document.getElementById("login-card");
@@ -796,26 +685,62 @@ async function toggleView() {
   const footer = document.querySelector("footer");
   const overlay = document.querySelector(".control-overlay");
   const hudEl = document.querySelector(".hud");
+  if (header) header.style.display = "none";
+  if (loginCard) loginCard.style.display = "none";
+  if (registerCard) registerCard.style.display = "none";
+  if (footer) footer.style.display = "none";
+  if (streamCard) streamCard.style.display = "none";
+  if (overlay) overlay.style.display = "none";
+  if (hudEl) hudEl.style.display = "none";
 
-  if (vrMode) {
-    await stopConnection();
-    await start({ vr: true });
+  const vrWrap = ensureVrWrap();
+  vrWrap.style.display = "flex";
+  body.classList.add("vr-active");
+  if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
+  statusTxt.textContent = "👓 VR-Modus aktiv";
+}
+
+function exitVrUi() {
+  const body = document.body;
+  const header = document.querySelector("header");
+  const footer = document.querySelector("footer");
+  const streamCard = document.getElementById("stream-card");
+  const overlay = document.querySelector(".control-overlay");
+  const hudEl = document.querySelector(".hud");
+
+  body.classList.remove("vr-active");
+  const wrap = document.getElementById("vr-sbs-wrap");
+  if (wrap) wrap.remove();
+  vrLeftVideo = null;
+  vrRightVideo = null;
+
+  if (header) header.style.display = "";
+  if (footer) footer.style.display = "";
+  if (streamCard) streamCard.style.display = "block";
+  if (overlay) overlay.style.display = "";
+  if (hudEl) hudEl.style.display = "";
+
+  document.exitFullscreen?.().catch(() => {});
+  statusTxt.textContent = "🖥 Normal-Modus";
+}
+
+async function switchStreamMode(vr) {
+  if (connecting) return;
+  await stopConnection();
+  await start({ vr });
+}
+
+// Schaltet zwischen normaler und VR-Ansicht
+async function toggleView() {
+  if (connecting) return;
+  const targetVr = !vrMode;
+  vrMode = targetVr;
+  if (targetVr) {
+    enterVrUi();
+    await switchStreamMode(true);
   } else {
-    body.classList.remove("vr-active");
-    const wrap = document.getElementById("vr-sbs-wrap");
-    if (wrap) wrap.remove();
-
-    if (header) header.style.display = "";
-    if (loginCard) loginCard.style.display = "none";
-    if (registerCard) registerCard.style.display = "none";
-    if (footer) footer.style.display = "";
-    if (streamCard) streamCard.style.display = "block";
-    if (overlay) overlay.style.display = "";
-    if (hudEl) hudEl.style.display = "";
-
-    document.exitFullscreen?.().catch(() => {});
-    await stopConnection();
-    await start({ vr: false });
+    exitVrUi();
+    await switchStreamMode(false);
   }
 }
 
@@ -825,10 +750,7 @@ async function toggleView() {
 
 // Vollbildmodus aktivieren
 function toggleFullscreen() {
-  const target =
-    document.getElementById("vr-sbs-wrap") ||
-    go2rtcPlayer ||
-    document.getElementById("player-wrap");
+  const target = document.getElementById("vr-sbs-wrap") || video;
   if (!target) return;
   if (target.requestFullscreen) target.requestFullscreen();
   else if (target.webkitRequestFullscreen) target.webkitRequestFullscreen();
@@ -867,30 +789,4 @@ function hideLoginVideo() {
       document.body.classList.remove("login-active");
     }, 800);
   }
-}
-
-/* =====================================================
-   🚪 MANUELLER LOGOUT (ALLE BENUTZER)
-===================================================== */
-function logoutUser() {
-  // Verbindung schließen, falls vorhanden
-  try {
-    if (pc) pc.close();
-  } catch {}
-
-  // Token & Status löschen
-  localStorage.removeItem("jwt_token");
-  localStorage.removeItem("jwt_expiry");
-  localStorage.removeItem("is_admin");
-
-  token = null;
-  tokenExpiry = null;
-  isAdmin = false;
-
-  showFeedback("👋 Erfolgreich abgemeldet!", "success");
-
-  // Nach 1 Sekunde zurück zur Login-Seite
-  setTimeout(() => {
-    location.reload();
-  }, 1000);
 }
