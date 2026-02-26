@@ -560,13 +560,18 @@ async function start({ vr = false } = {}) {
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+    const offerPayload = {
+      sdp: pc.localDescription.sdp,
+      type: pc.localDescription.type,
+      vr
+    };
     const res = await fetch("/offer", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${token}`
       },
-      body: JSON.stringify({ ...pc.localDescription, vr })
+      body: JSON.stringify(offerPayload)
     });
 
     if (!res.ok) {

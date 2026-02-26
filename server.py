@@ -3,8 +3,6 @@
 # 🚀 VR-Racer Backend – Final Stable (2 feste Admins)
 # ======================================================
 
-import asyncio
-import json
 import sqlite3
 import hashlib
 import os
@@ -438,6 +436,8 @@ async def offer(request: web.Request) -> web.Response:
     try:
         params = await request.json()
         vr_mode = bool(params.get("vr", False))
+        if "sdp" not in params or "type" not in params:
+            return web.Response(status=400, text="Missing SDP offer")
         offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
         pc = RTCPeerConnection()
         pcs.add(pc)

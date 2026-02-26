@@ -6,6 +6,5 @@ python-dotenv
 PyJWT
 opencv-python-headless
 numpy
-inputs
 
 # Hallo
