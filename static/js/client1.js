@@ -402,6 +402,11 @@ function startTokenCountdown() {
 // Automatischer Logout, wenn Token abläuft
 function logoutDueToExpiry() {
   showFeedback("⚠️ Sitzung abgelaufen – bitte neu anmelden!", "error");
+  stopConnection();
+  if (vrMode) {
+    exitVrUi();
+    vrMode = false;
+  }
   localStorage.removeItem("jwt_token");
   localStorage.removeItem("jwt_expiry");
   localStorage.removeItem("is_admin");
@@ -409,6 +414,22 @@ function logoutDueToExpiry() {
   tokenExpiry = null;
   isAdmin = false;
   setTimeout(() => location.reload(), 2000);
+}
+
+// Manueller Logout (Button)
+function logoutUser() {
+  stopConnection();
+  if (vrMode) {
+    exitVrUi();
+    vrMode = false;
+  }
+  localStorage.removeItem("jwt_token");
+  localStorage.removeItem("jwt_expiry");
+  localStorage.removeItem("is_admin");
+  token = null;
+  tokenExpiry = null;
+  isAdmin = false;
+  location.reload();
 }
 
 /* =====================================================
@@ -544,7 +565,7 @@ async function start({ vr = false } = {}) {
     }
 
     pc.ontrack = (event) => {
-      const stream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
+      const stream = new MediaStream([event.track]);
       if (!vr) {
         currentStream = stream;
         video.srcObject = currentStream;
@@ -602,6 +623,7 @@ function createOverlay() {
     <button class="overlay-btn" title="Vollbild" onclick="toggleFullscreen()">🖥️</button>
     <button class="overlay-btn" title="VR-Modus" onclick="toggleView()">👓</button>
     ${isAdmin ? `<button class="overlay-btn" title="Benutzerverwaltung" onclick="openAdminPanel()">🛠️</button>` : ""}
+    <button class="overlay-btn" title="Abmelden" onclick="logoutUser()">🚪</button>
   `;
   document.querySelector(".status-bar").appendChild(overlay);
 }
