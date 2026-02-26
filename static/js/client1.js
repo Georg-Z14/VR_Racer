@@ -25,7 +25,52 @@ let hudFps  = "🎥 -- FPS";     // Frames pro Sekunde
 // go2rtc-Settings
 const GO2RTC_STREAM_PRIMARY = "cam_r"; // Rechte Kamera (Standard)
 const GO2RTC_STREAM_VR = "cam_l";      // Linke Kamera (nur im VR-Modus)
-const GO2RTC_PREFIX = "/go2rtc";
+const GO2RTC_BASE =
+  window.GO2RTC_BASE ||
+  document.querySelector('meta[name="go2rtc-base"]')?.content ||
+  document.body?.dataset?.go2rtcBase ||
+  "/go2rtc";
+
+function stripTrailingSlashes(value) {
+  return value.replace(/\/+$/g, "");
+}
+
+function normalizeHttpBase(base) {
+  if (!base || base === "/") return "";
+  return stripTrailingSlashes(base);
+}
+
+function resolveGo2RTCStatic(fileName) {
+  if (GO2RTC_BASE.startsWith("http://") || GO2RTC_BASE.startsWith("https://")) {
+    const base = normalizeHttpBase(GO2RTC_BASE);
+    return `${base}/${fileName}`;
+  }
+  if (GO2RTC_BASE.startsWith("ws://") || GO2RTC_BASE.startsWith("wss://")) {
+    const wsUrl = new URL(GO2RTC_BASE);
+    const httpScheme = wsUrl.protocol === "wss:" ? "https:" : "http:";
+    const path = normalizeHttpBase(wsUrl.pathname);
+    return `${httpScheme}//${wsUrl.host}${path}/${fileName}`;
+  }
+  const path = normalizeHttpBase(GO2RTC_BASE);
+  return `${path}/${fileName}`;
+}
+
+function buildGo2RTCWsUrl(streamName) {
+  const src = encodeURIComponent(streamName);
+  if (GO2RTC_BASE.startsWith("ws://") || GO2RTC_BASE.startsWith("wss://")) {
+    const base = stripTrailingSlashes(GO2RTC_BASE);
+    return `${base}/api/ws?src=${src}`;
+  }
+  if (GO2RTC_BASE.startsWith("http://") || GO2RTC_BASE.startsWith("https://")) {
+    const httpUrl = new URL(GO2RTC_BASE);
+    const wsScheme = httpUrl.protocol === "https:" ? "wss:" : "ws:";
+    const basePath = normalizeHttpBase(httpUrl.pathname);
+    return `${wsScheme}//${httpUrl.host}${basePath}/api/ws?src=${src}`;
+  }
+  const wsScheme = location.protocol === "https:" ? "wss" : "ws";
+  const basePath = normalizeHttpBase(GO2RTC_BASE);
+  return `${wsScheme}://${location.host}${basePath}/api/ws?src=${src}`;
+}
 
 /* =====================================================
    🔑 LOGIN / REGISTRIERUNG (JWT)
@@ -484,7 +529,7 @@ function loadGo2RTCScript() {
   return new Promise((resolve, reject) => {
     if (go2rtcScriptLoaded) return resolve();
     const script = document.createElement("script");
-    script.src = `${GO2RTC_PREFIX}/video-rtc.js`;
+    script.src = resolveGo2RTCStatic("video-rtc.js");
     script.onload = () => {
       go2rtcScriptLoaded = true;
       resolve();
@@ -501,8 +546,7 @@ function createGo2RTCPlayer(streamName) {
   player.setAttribute("muted", "true");
   player.style.width = "100%";
   player.style.height = "100%";
-  const wsScheme = location.protocol === "https:" ? "wss" : "ws";
-  const wsUrl = `${wsScheme}://${location.host}${GO2RTC_PREFIX}/api/ws?src=${streamName}`;
+  const wsUrl = buildGo2RTCWsUrl(streamName);
   player.setAttribute("src", wsUrl);
   return player;
 }
