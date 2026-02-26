@@ -9,7 +9,8 @@ set -euo pipefail
 # ======================================================
 ENV_FILE=".env"                  # unverschlüsselte Umgebungsvariablen
 SERVER_SCRIPT="server.py"        # Python-Server, der gestartet werden soll
-PYTHON_BIN="${PYTHON_BIN:-python3}"   # Python-Interpreter
+VENV_DIR="${VENV_DIR:-venv}"
+PYTHON_BIN="${PYTHON_BIN:-${VENV_DIR}/bin/python}"   # Python-Interpreter (immer venv)
 GO2RTC_BIN="${GO2RTC_BIN:-go2rtc}"
 GO2RTC_CONFIG="${GO2RTC_CONFIG:-go2rtc.yaml}"
 START_GO2RTC="${START_GO2RTC:-1}"
@@ -20,6 +21,12 @@ START_GO2RTC="${START_GO2RTC:-1}"
 # ======================================================
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "❌ Keine .env-Datei gefunden. Abbruch."
+  exit 1
+fi
+
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  echo "❌ Venv-Python nicht gefunden: $PYTHON_BIN"
+  echo "   Stelle sicher, dass dein venv existiert (z. B.: python3 -m venv $VENV_DIR)."
   exit 1
 fi
 
