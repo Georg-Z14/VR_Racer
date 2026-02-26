@@ -28,7 +28,6 @@ load_dotenv()
 pcs = set()
 relay = MediaRelay()
 camera_manager = None
-STREAM_BACKEND = os.getenv("STREAM_BACKEND", "go2rtc").lower()  # "go2rtc" (default) or "python"
 
 
 def _parse_size(raw: str, default=(1280, 720)):
@@ -432,8 +431,6 @@ async def ping(request: web.Request) -> web.Response:
     return web.Response(status=204)
 
 async def offer(request: web.Request) -> web.Response:
-    if STREAM_BACKEND != "python":
-        return web.Response(status=503, text="Streaming disabled (go2rtc mode)")
     user = require_auth(request)
     if not user:
         return web.Response(status=401, text="Unauthorized")
@@ -541,9 +538,8 @@ async def on_shutdown(app: web.Application):
 def create_app() -> web.Application:
     global camera_manager
     init_db()
-    if STREAM_BACKEND == "python":
-        if camera_manager is None:
-            camera_manager = CameraManager(relay, target_size=CAMERA_SIZE)
+    if camera_manager is None:
+        camera_manager = CameraManager(relay, target_size=CAMERA_SIZE)
     app = web.Application()
     app.router.add_get("/", index)
     app.router.add_get("/dashboard", dashboard)
@@ -551,8 +547,7 @@ def create_app() -> web.Application:
     app.router.add_get("/ping", ping)
     app.router.add_post("/login", login)
     app.router.add_post("/register", register)
-    if STREAM_BACKEND == "python":
-        app.router.add_post("/offer", offer)
+    app.router.add_post("/offer", offer)
     app.router.add_get("/admin/users", admin_users)
     app.router.add_post("/admin/delete", admin_delete)
     app.router.add_post("/admin/update", admin_update)

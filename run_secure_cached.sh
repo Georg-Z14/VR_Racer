@@ -11,9 +11,6 @@ ENV_FILE=".env"                  # unverschlüsselte Umgebungsvariablen
 SERVER_SCRIPT="server.py"        # Python-Server, der gestartet werden soll
 VENV_DIR="${VENV_DIR:-venv}"
 PYTHON_BIN="${PYTHON_BIN:-${VENV_DIR}/bin/python}"   # Python-Interpreter (immer venv)
-GO2RTC_BIN="${GO2RTC_BIN:-go2rtc}"
-GO2RTC_CONFIG="${GO2RTC_CONFIG:-go2rtc.yaml}"
-START_GO2RTC="${START_GO2RTC:-1}"
 # Ausgabe bleibt auf STDOUT/STDERR – keine server.log mehr
 
 # ======================================================
@@ -52,21 +49,6 @@ set +o allexport
 # ======================================================
 echo "🚀 Starte VR-Racer Server..."
 
-# ======================================================
-# 📡 GO2RTC STARTEN (LOW-LATENCY STREAMING)
-# ======================================================
-GO2RTC_PID=""
-if [[ "$START_GO2RTC" == "1" ]]; then
-  if command -v "$GO2RTC_BIN" >/dev/null 2>&1; then
-    echo "📡 Starte go2rtc..."
-    "$GO2RTC_BIN" -config "$GO2RTC_CONFIG" &
-    GO2RTC_PID=$!
-    echo "✅ go2rtc läuft (PID: $GO2RTC_PID)"
-  else
-    echo "⚠️ go2rtc nicht gefunden – Stream wird nicht gestartet."
-  fi
-fi
-
 $PYTHON_BIN "$SERVER_SCRIPT" &  # Server im Hintergrund starten
 SERVER_PID=$!
 
@@ -83,11 +65,6 @@ cleanup() {
   if kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
-  fi
-  if [[ -n "$GO2RTC_PID" ]] && kill -0 "$GO2RTC_PID" 2>/dev/null; then
-    echo "🧹 Stoppe go2rtc..."
-    kill "$GO2RTC_PID" 2>/dev/null || true
-    wait "$GO2RTC_PID" 2>/dev/null || true
   fi
   echo "🛑 Server beendet."
 }
