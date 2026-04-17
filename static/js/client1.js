@@ -30,10 +30,10 @@ const XR_SCREEN_SCALE = Math.min(0.9, Math.max(0.2, readXrNumberParam("xrScale",
 const DEFAULT_VR_EYE_ASPECT = 16 / 9;
 const XR_STEREO_EYE_ASPECT = readXrNumberParam("xrEyeAspect", DEFAULT_VR_EYE_ASPECT);
 const XR_STEREO_CROP = Math.min(0.08, Math.max(0.0, readSignedXrNumberParam("xrStereoCrop", 0.035)));
-const XR_CONVERGENCE = Math.min(0.08, Math.max(-0.08, readSignedXrNumberParam("xrConvergence", 0.012)));
-const XR_STEREO_STRENGTH = Math.min(1.0, Math.max(0.0, readSignedXrNumberParam("xrStereoStrength", 0.68)));
+const XR_CONVERGENCE = Math.min(0.08, Math.max(-0.08, readSignedXrNumberParam("xrConvergence", 0.0)));
+const XR_STEREO_STRENGTH = Math.min(1.0, Math.max(0.0, readSignedXrNumberParam("xrStereoStrength", 0.38)));
 const XR_VERTICAL_ALIGN = Math.min(0.06, Math.max(-0.06, readSignedXrNumberParam("xrVerticalAlign", 0.0)));
-const XR_SWAP_EYES = readXrBoolParam("xrSwapEyes", false);
+const XR_SWAP_EYES = readXrBoolParam("xrSwapEyes", true);
 const XR_MONO = readXrBoolParam("xrMono", false);
 let vrEyeAspect = DEFAULT_VR_EYE_ASPECT;
 
