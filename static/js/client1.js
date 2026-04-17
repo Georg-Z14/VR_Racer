@@ -31,6 +31,8 @@ const DEFAULT_VR_EYE_ASPECT = 16 / 9;
 const XR_STEREO_EYE_ASPECT = readXrNumberParam("xrEyeAspect", DEFAULT_VR_EYE_ASPECT);
 const XR_STEREO_CROP = Math.min(0.08, Math.max(0.0, readSignedXrNumberParam("xrStereoCrop", 0.035)));
 const XR_CONVERGENCE = Math.min(0.08, Math.max(-0.08, readSignedXrNumberParam("xrConvergence", 0.012)));
+const XR_STEREO_STRENGTH = Math.min(1.0, Math.max(0.0, readSignedXrNumberParam("xrStereoStrength", 0.68)));
+const XR_VERTICAL_ALIGN = Math.min(0.06, Math.max(-0.06, readSignedXrNumberParam("xrVerticalAlign", 0.0)));
 const XR_SWAP_EYES = readXrBoolParam("xrSwapEyes", false);
 const XR_MONO = readXrBoolParam("xrMono", false);
 let vrEyeAspect = DEFAULT_VR_EYE_ASPECT;
@@ -715,7 +717,7 @@ function getScreenContainScale(videoEl, stereoSbs, viewport) {
 
 function getStereoUvWindow(isLeftEye, stereoSbs) {
   if (!stereoSbs) {
-    return { offset: 0.0, scale: 1.0 };
+    return { offset: 0.0, scale: 1.0, verticalShift: 0.0 };
   }
 
   const sourceIsLeft = XR_MONO ? !XR_SWAP_EYES : (isLeftEye !== XR_SWAP_EYES);
@@ -728,6 +730,22 @@ function getStereoUvWindow(isLeftEye, stereoSbs) {
 
   return {
     offset: Math.min(maxOffset, Math.max(minOffset, rawOffset)),
+    scale,
+    verticalShift: XR_MONO ? 0.0 : (isLeftEye ? XR_VERTICAL_ALIGN : -XR_VERTICAL_ALIGN)
+  };
+}
+
+function getMonoUvWindow(stereoSbs) {
+  if (!stereoSbs) {
+    return { offset: 0.0, scale: 1.0 };
+  }
+
+  const sourceIsLeft = !XR_SWAP_EYES;
+  const baseOffset = sourceIsLeft ? 0.0 : 0.5;
+  const scale = Math.max(0.34, 0.5 - 2 * XR_STEREO_CROP);
+
+  return {
+    offset: baseOffset + XR_STEREO_CROP,
     scale
   };
 }
@@ -911,12 +929,23 @@ async function createWebXrRenderer(session) {
     uniform vec2 u_uvOffset;
     uniform float u_eyeOffset;
     uniform float u_eyeScale;
+    uniform float u_monoOffset;
+    uniform float u_monoScale;
+    uniform float u_stereoStrength;
+    uniform float u_verticalShift;
     varying vec2 v_texCoord;
 
     void main() {
       vec2 uv = u_uvOffset + v_texCoord * u_uvScale;
       uv.x = u_eyeOffset + uv.x * u_eyeScale;
-      gl_FragColor = texture2D(u_texture, uv);
+      uv.y = clamp(uv.y + u_verticalShift, 0.0, 1.0);
+
+      vec2 monoUv = u_uvOffset + v_texCoord * u_uvScale;
+      monoUv.x = u_monoOffset + monoUv.x * u_monoScale;
+
+      vec4 monoColor = texture2D(u_texture, monoUv);
+      vec4 stereoColor = texture2D(u_texture, uv);
+      gl_FragColor = mix(monoColor, stereoColor, u_stereoStrength);
     }
   `);
 
@@ -949,6 +978,10 @@ async function createWebXrRenderer(session) {
     uvOffsetLocation: gl.getUniformLocation(program, "u_uvOffset"),
     eyeOffsetLocation: gl.getUniformLocation(program, "u_eyeOffset"),
     eyeScaleLocation: gl.getUniformLocation(program, "u_eyeScale"),
+    monoOffsetLocation: gl.getUniformLocation(program, "u_monoOffset"),
+    monoScaleLocation: gl.getUniformLocation(program, "u_monoScale"),
+    stereoStrengthLocation: gl.getUniformLocation(program, "u_stereoStrength"),
+    verticalShiftLocation: gl.getUniformLocation(program, "u_verticalShift"),
     screenScaleLocation: gl.getUniformLocation(program, "u_screenScale"),
     stereoSbs: false,
     videoReady: false,
@@ -1047,6 +1080,7 @@ function renderWebXrFrame(time, frame) {
     const eyeVideo = xrState.stereoSbs ? vrLeftVideo : (isLeftEye ? vrLeftVideo : vrRightVideo);
     const eyeTexture = xrState.stereoSbs ? xrState.leftTexture : (isLeftEye ? xrState.leftTexture : xrState.rightTexture);
     const stereoWindow = getStereoUvWindow(isLeftEye, xrState.stereoSbs);
+    const monoWindow = getMonoUvWindow(xrState.stereoSbs);
     const layout = getVideoLayout(eyeVideo, xrState.stereoSbs);
     const screenScale = getScreenContainScale(eyeVideo, xrState.stereoSbs, viewport);
 
@@ -1065,6 +1099,10 @@ function renderWebXrFrame(time, frame) {
     gl.uniform2fv(xrState.uvOffsetLocation, layout.uvOffset);
     gl.uniform1f(xrState.eyeOffsetLocation, stereoWindow.offset);
     gl.uniform1f(xrState.eyeScaleLocation, stereoWindow.scale);
+    gl.uniform1f(xrState.monoOffsetLocation, monoWindow.offset);
+    gl.uniform1f(xrState.monoScaleLocation, monoWindow.scale);
+    gl.uniform1f(xrState.stereoStrengthLocation, xrState.stereoSbs && !XR_MONO ? XR_STEREO_STRENGTH : 1.0);
+    gl.uniform1f(xrState.verticalShiftLocation, stereoWindow.verticalShift || 0.0);
     gl.uniform2fv(xrState.screenScaleLocation, screenScale);
     gl.drawArrays(gl.TRIANGLES, 0, xrState.vertexCount);
   }
