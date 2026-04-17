@@ -7,6 +7,8 @@ cd "$PROJECT_DIR"
 export PYTHONUTF8=1
 export PYTHONIOENCODING=utf-8
 export PYTHONUNBUFFERED=1
+export CONTROLLER_AUTO_SELECT="${CONTROLLER_AUTO_SELECT:-1}"
+export CONTROLLER_STATUS_FILE="${CONTROLLER_STATUS_FILE:-/tmp/vr-racer-controller.status}"
 
 if [[ -f ".env" ]]; then
   set -a

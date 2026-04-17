@@ -17,6 +17,7 @@ let vrStereoSbs = false;      // True, wenn ein kombinierter Stereo-Stream genut
 let xrSession = null;         // Echte WebXR-Session für Apple Vision Pro
 let xrState = null;           // WebGL/WebXR-Renderer-State
 let xrVideoHost = null;       // Unsichtbarer Host fuer Safari/visionOS Video-Decoding
+let vrPreparingWebXr = false; // VR-Stream wird aufgebaut, bevor WebXR startet
 const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
 const XR_RENDER_MODE = new URLSearchParams(window.location.search).get("xrMode") || "curved";
 const XR_DISTANCE_OVERRIDE = readXrNumberParam("xrDistance", null);
@@ -694,6 +695,24 @@ function attachHiddenXrVideo(videoEl) {
   videoEl.play().catch(() => {});
 }
 
+async function waitForVrVideoReady(timeoutMs = 10000) {
+  const started = performance.now();
+  while (performance.now() - started < timeoutMs) {
+    if (
+      vrLeftVideo &&
+      vrLeftVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+      vrLeftVideo.videoWidth > 0 &&
+      vrLeftVideo.videoHeight > 0
+    ) {
+      return true;
+    }
+    if (vrLeftVideo) vrLeftVideo.play().catch(() => {});
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  console.warn("VR-Video hatte vor WebXR-Start noch kein Frame.");
+  return false;
+}
+
 function createWebXrRenderer(session) {
   const canvas = document.createElement("canvas");
   canvas.id = "webxr-vr-canvas";
@@ -1007,7 +1026,7 @@ function ensureVrWrap() {
 
 function attachVrStreams(leftStream, rightStream = null) {
   vrStereoSbs = !rightStream;
-  if (xrSession) {
+  if (xrSession || vrPreparingWebXr) {
     vrLeftVideo = createVrVideo(leftStream);
     vrRightVideo = rightStream ? createVrVideo(rightStream) : null;
     attachHiddenXrVideo(vrLeftVideo);
@@ -1045,7 +1064,7 @@ function attachVrStreams(leftStream, rightStream = null) {
 
 // Verbindung zu WebRTC-Server aufbauen
 async function start({ vr = false } = {}) {
-  if (connecting) return;
+  if (connecting) return false;
   connecting = true;
   statusTxt.textContent = "🔄 Verbinde...";
   resetStreams();
@@ -1091,16 +1110,18 @@ async function start({ vr = false } = {}) {
     if (!res.ok) {
       statusTxt.textContent = "❌ Zugriff verweigert!";
       await stopConnection();
-      return;
+      return false;
     }
 
     const answer = await res.json();
     await pc.setRemoteDescription(answer);
     statusTxt.textContent = vr ? "👓 VR verbunden!" : "✅ Verbunden!";
     monitorPing(pc);
+    return true;
   } catch {
     statusTxt.textContent = "⚠️ Stream-Fehler!";
     await stopConnection();
+    return false;
   } finally {
     connecting = false;
   }
@@ -1218,10 +1239,18 @@ async function enterVrUi() {
 
   const webXrStarted = await startWebXrSession();
   if (!webXrStarted) {
-    const vrWrap = ensureVrWrap();
-    vrWrap.style.display = "flex";
-    if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
+    if (vrStreams.length > 0) {
+      attachVrStreams(vrStreams[0], vrStreams[1] || null);
+    } else {
+      const vrWrap = ensureVrWrap();
+      vrWrap.style.display = "flex";
+      if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
+    }
     statusTxt.textContent = "👓 Side-by-Side-VR aktiv";
+  } else {
+    attachHiddenXrVideo(vrLeftVideo);
+    attachHiddenXrVideo(vrRightVideo);
+    if (xrState) xrState.stereoSbs = vrStereoSbs;
   }
 }
 
@@ -1256,9 +1285,9 @@ async function exitVrUi() {
 }
 
 async function switchStreamMode(vr) {
-  if (connecting) return;
+  if (connecting) return false;
   await stopConnection();
-  await start({ vr });
+  return await start({ vr });
 }
 
 // Schaltet zwischen normaler und VR-Ansicht
@@ -1267,9 +1296,19 @@ async function toggleView() {
   const targetVr = !vrMode;
   vrMode = targetVr;
   if (targetVr) {
+    vrPreparingWebXr = true;
+    const streamStarted = await switchStreamMode(true);
+    const videoReady = streamStarted ? await waitForVrVideoReady() : false;
+    vrPreparingWebXr = false;
+    if (!streamStarted || !videoReady) {
+      vrMode = false;
+      statusTxt.textContent = "⚠️ VR-Stream nicht bereit";
+      await switchStreamMode(false);
+      return;
+    }
     await enterVrUi();
-    await switchStreamMode(true);
   } else {
+    vrPreparingWebXr = false;
     await exitVrUi();
     await switchStreamMode(false);
   }

@@ -1,26 +1,19 @@
 #!/usr/bin/env python3
 """
-RC-Car Steuerung mit Raspberry Pi 5 und PS5 DualSense Controller.
+RC-Car Steuerung (stabile Version).
 
-- Lenkung: Linker Analog-Stick X-Achse
-- Vorwaerts: R2
-- Rueckwaerts: L2
-- Not-Stop: Programmende setzt Motor und Servo auf neutral
-
-Hardware:
-- Servo: GPIO 18
-- L298N Motor-Treiber:
-  - IN1: GPIO 17
-  - IN2: GPIO 27
-  - ENA: GPIO 12
-
-Abhaengigkeiten: gpiozero, lgpio, evdev
+Verbesserungen:
+- Ruhiger Servo durch angepasste Pulsbreite, Filtering und Smoothing
+- Servo wird bei Neutralstellung deaktiviert
+- Controller-Erkennung generisch ueber Analogachsen
+- Automatische Auswahl fuer systemd-Autostart
+- Statusdatei, damit der Controller-Zustand schnell pruefbar ist
+- Sauberes Cleanup bei Abbruch
 """
 
 import os
 import sys
 import time
-from select import select
 
 from evdev import InputDevice, ecodes, list_devices
 from gpiozero import OutputDevice, PWMOutputDevice, Servo
@@ -33,22 +26,20 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
-# Konstanten und Einstellungen
+# Konstanten / Einstellungen
 MAX_STEER_ANGLE = 25.0
 DEADZONE_STICK = 0.08
 DEADZONE_TRIGGER = 0.05
-SERVO_SMOOTHING = float(os.getenv("SERVO_SMOOTHING", "0.45"))
-SERVO_MIN_DELTA = float(os.getenv("SERVO_MIN_DELTA", "0.01"))
-SERVO_CENTER_SNAP = float(os.getenv("SERVO_CENTER_SNAP", "0.03"))
-CONTROLLER_STATUS_FILE = os.getenv("CONTROLLER_STATUS_FILE", "/tmp/vr-racer-controller.status")
-CONTROLLER_STATUS_INTERVAL = float(os.getenv("CONTROLLER_STATUS_INTERVAL", "5"))
 
 SERVO_PIN = 18
 MOTOR_IN1 = 17
 MOTOR_IN2 = 27
 MOTOR_ENA = 12
 PWM_FREQUENCY = 1000
-DUALSENSE_NAMES = ("dualsense", "wireless controller")
+
+CONTROLLER_AUTO_SELECT = os.getenv("CONTROLLER_AUTO_SELECT", "1").lower() not in ("0", "false", "no", "off")
+CONTROLLER_DEVICE_PATH = os.getenv("CONTROLLER_DEVICE_PATH", "").strip()
+CONTROLLER_STATUS_FILE = os.getenv("CONTROLLER_STATUS_FILE", "/tmp/vr-racer-controller.status")
 
 
 # GPIO Initialisierung
@@ -58,15 +49,15 @@ servo = Servo(
     SERVO_PIN,
     pin_factory=factory,
     min_pulse_width=0.0008,
-    max_pulse_width=0.0022
+    max_pulse_width=0.0022,
 )
 
 IN1 = OutputDevice(MOTOR_IN1, pin_factory=factory)
 IN2 = OutputDevice(MOTOR_IN2, pin_factory=factory)
 ENA = PWMOutputDevice(MOTOR_ENA, pin_factory=factory, frequency=PWM_FREQUENCY)
 
-_servo_value = 0.0
-_motor_speed = 0.0
+
+last_servo_value = 0.0
 
 
 def write_status(state: str, detail: str = "") -> None:
@@ -81,34 +72,40 @@ def write_status(state: str, detail: str = "") -> None:
         pass
 
 
-def set_servo(angle_deg: float, immediate: bool = False) -> None:
-    """Setzt den Lenkwinkel des Servos."""
-    global _servo_value
+def set_servo(angle_deg: float) -> None:
+    """
+    Setzt den Lenkwinkel des Servos mit Begrenzung, Filtering und Smoothing.
+    In Neutralstellung wird das Servo deaktiviert, damit es nicht permanent
+    gegen die Mitte arbeitet.
+    """
+    global last_servo_value
 
     clamped = max(-MAX_STEER_ANGLE, min(MAX_STEER_ANGLE, angle_deg))
-    target_value = clamped / MAX_STEER_ANGLE
+    value = clamped / MAX_STEER_ANGLE
 
-    if immediate:
-        next_value = target_value
-    else:
-        next_value = _servo_value + (target_value - _servo_value) * SERVO_SMOOTHING
-        if abs(target_value) < SERVO_CENTER_SNAP and abs(next_value) < SERVO_CENTER_SNAP:
-            next_value = 0.0
-        if abs(next_value - _servo_value) < SERVO_MIN_DELTA:
-            return
+    if abs(value) < 0.02:
+        servo.detach()
+        last_servo_value = 0.0
+        return
 
-    _servo_value = max(-1.0, min(1.0, next_value))
-    servo.value = _servo_value
+    if abs(value - last_servo_value) < 0.02:
+        return
+
+    step = 0.03
+    current = last_servo_value
+
+    while abs(value - current) > step:
+        current += step if value > current else -step
+        servo.value = current
+        time.sleep(0.01)
+
+    servo.value = value
+    last_servo_value = value
 
 
 def set_motor(speed: float) -> None:
-    """Setzt Motorgeschwindigkeit und Richtung ueber den L298N."""
-    global _motor_speed
-
+    """Setzt Geschwindigkeit und Richtung des Motors."""
     speed = max(-1.0, min(1.0, speed))
-    if abs(speed - _motor_speed) < 0.01:
-        return
-    _motor_speed = speed
 
     if speed > 0:
         IN1.on()
@@ -125,30 +122,82 @@ def set_motor(speed: float) -> None:
 
 
 def emergency_stop() -> None:
-    """Sofortiger Not-Stop: Motor und Servo auf neutral."""
-    global _motor_speed
-
-    _motor_speed = 999.0
+    """Stoppt Motor und deaktiviert das Servo."""
     set_motor(0.0)
-    set_servo(0.0, immediate=True)
+    servo.detach()
 
 
-def find_dualsense() -> InputDevice | None:
-    """Sucht nach einem angeschlossenen PS5 DualSense Controller."""
+def describe_device(device: InputDevice) -> str:
+    return f"{device.name} ({device.path})"
+
+
+def device_score(device: InputDevice) -> int:
+    name = (device.name or "").lower()
+    score = 0
+    if "dualsense" in name:
+        score += 100
+    if "wireless controller" in name:
+        score += 80
+    if "sony" in name or "playstation" in name:
+        score += 60
+    try:
+        abs_codes = set(device.capabilities(absinfo=False).get(ecodes.EV_ABS, []))
+    except OSError:
+        return score
+    if ecodes.ABS_X in abs_codes:
+        score += 10
+    if ecodes.ABS_Z in abs_codes:
+        score += 10
+    if ecodes.ABS_RZ in abs_codes:
+        score += 10
+    return score
+
+
+def find_controller() -> InputDevice | None:
+    """Sucht generisch nach Eingabegeraeten mit Analogachsen."""
+    devices = []
+
+    if CONTROLLER_DEVICE_PATH:
+        try:
+            return InputDevice(CONTROLLER_DEVICE_PATH)
+        except OSError:
+            print(f"Controller-Pfad nicht verfuegbar: {CONTROLLER_DEVICE_PATH}")
+
     for path in list_devices():
         try:
             device = InputDevice(path)
+            capabilities = device.capabilities()
+            if ecodes.EV_ABS in capabilities:
+                devices.append(device)
         except Exception:
             continue
 
-        name = (device.name or "").lower()
-        if any(controller_name in name for controller_name in DUALSENSE_NAMES):
-            return device
+    if not devices:
+        return None
 
-    return None
+    devices.sort(key=device_score, reverse=True)
+
+    if len(devices) == 1 or CONTROLLER_AUTO_SELECT or not sys.stdin.isatty():
+        selected = devices[0]
+        if len(devices) > 1:
+            print("Mehrere Eingabegeraete gefunden, Autostart nutzt:", describe_device(selected))
+            for device in devices:
+                print("  -", describe_device(device))
+        return selected
+
+    print("\nGefundene Eingabegeraete:")
+    for i, device in enumerate(devices):
+        print(f"{i}: {describe_device(device)}")
+
+    while True:
+        try:
+            idx = int(input("Waehle Controller Nummer: "))
+            return devices[idx]
+        except Exception:
+            print("Ungueltige Eingabe")
 
 
-def handle_controller_event(event, state: dict) -> None:
+def handle_event(event, state: dict) -> None:
     if event.type != ecodes.EV_ABS:
         return
 
@@ -172,58 +221,43 @@ def handle_controller_event(event, state: dict) -> None:
 
 
 def main() -> None:
-    print("=== RC-Car Steuerung - PS5 DualSense Edition ===")
-    print(f"Lenkung: Linker Stick X (+/-{MAX_STEER_ANGLE} Grad)")
-    print("Gas: R2 = Vorwaerts, L2 = Rueckwaerts")
+    print("=== RC-Car Steuerung (stabile Version) ===")
     print(f"Statusdatei: {CONTROLLER_STATUS_FILE}")
-    print("------------------------------------------------")
-
     emergency_stop()
-    write_status("waiting", "Kein DualSense verbunden")
+    write_status("waiting", "Kein Controller verbunden")
 
     while True:
-        gamepad = find_dualsense()
+        gamepad = find_controller()
 
         if gamepad is None:
-            print("Kein DualSense gefunden - warte 2 Sekunden...")
-            write_status("waiting", "Kein DualSense verbunden")
+            print("Kein Controller gefunden...")
+            write_status("waiting", "Kein Controller verbunden")
             emergency_stop()
             time.sleep(2)
             continue
 
-        detail = f"{gamepad.name} | {gamepad.path}"
+        detail = describe_device(gamepad)
         print(f"Verbunden mit: {detail}")
-        print("Druecke Strg+C zum Beenden")
         write_status("connected", detail)
 
         state = {"r2": 0.0, "l2": 0.0}
-        last_status = time.monotonic()
 
         try:
-            while True:
-                ready, _, _ = select([gamepad.fd], [], [], 1.0)
-                now = time.monotonic()
-
-                if now - last_status >= CONTROLLER_STATUS_INTERVAL:
-                    write_status("connected", detail)
-                    last_status = now
-
-                if not ready:
-                    continue
-
-                for event in gamepad.read():
-                    handle_controller_event(event, state)
+            for event in gamepad.read_loop():
+                handle_event(event, state)
 
         except OSError:
-            print("Controller-Verbindung verloren!")
+            print("Controller getrennt")
             write_status("disconnected", detail)
             emergency_stop()
             time.sleep(1)
         except KeyboardInterrupt:
-            print("Programm beendet per Strg+C")
+            print("Programm beendet")
             write_status("stopped", "Programm beendet")
             emergency_stop()
             break
+        finally:
+            emergency_stop()
 
 
 if __name__ == "__main__":
