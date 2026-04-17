@@ -26,6 +26,7 @@ const XR_DISTANCE_OVERRIDE = readXrNumberParam("xrDistance", null);
 const XR_WIDTH_OVERRIDE = readXrNumberParam("xrWidth", null);
 const XR_FOV_OVERRIDE = readXrNumberParam("xrFov", null);
 const XR_VIDEO_TIMEOUT_MS = 7000;
+const XR_SCREEN_SCALE = Math.min(0.95, Math.max(0.45, readXrNumberParam("xrScale", 0.78)));
 const DEFAULT_VR_EYE_ASPECT = 4 / 3;
 let vrEyeAspect = DEFAULT_VR_EYE_ASPECT;
 
@@ -667,6 +668,33 @@ function getVideoLayout(videoEl, stereoSbs = false) {
   };
 }
 
+function getEyeVideoAspect(videoEl, stereoSbs = false) {
+  if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) {
+    return stereoSbs ? DEFAULT_VR_EYE_ASPECT : 16 / 9;
+  }
+
+  const sourceAspect = videoEl.videoWidth / videoEl.videoHeight;
+  return stereoSbs ? sourceAspect / 2 : sourceAspect;
+}
+
+function getScreenContainScale(videoEl, stereoSbs, viewport) {
+  const videoAspect = getEyeVideoAspect(videoEl, stereoSbs);
+  const viewportAspect = viewport?.width && viewport?.height
+    ? viewport.width / viewport.height
+    : 1;
+
+  let scaleX = XR_SCREEN_SCALE;
+  let scaleY = XR_SCREEN_SCALE;
+
+  if (videoAspect > viewportAspect) {
+    scaleY *= viewportAspect / videoAspect;
+  } else {
+    scaleX *= videoAspect / viewportAspect;
+  }
+
+  return [scaleX, scaleY];
+}
+
 function createVrVideo(stream) {
   const videoEl = document.createElement("video");
   videoEl.autoplay = true;
@@ -805,12 +833,12 @@ async function createWebXrRenderer(session) {
     uniform float u_planeDistance;
     uniform float u_curvedMode;
     uniform float u_halfFov;
+    uniform vec2 u_screenScale;
     varying vec2 v_texCoord;
 
     void main() {
       if (u_curvedMode < -0.5) {
-        float aspectScale = min(0.96, (u_planeScale.y / max(u_planeScale.x, 0.001)) * 0.96);
-        gl_Position = vec4(a_position.x * 0.96, a_position.y * aspectScale, 0.0, 1.0);
+        gl_Position = vec4(a_position * u_screenScale, 0.0, 1.0);
         v_texCoord = a_texCoord;
         return;
       }
@@ -880,6 +908,7 @@ async function createWebXrRenderer(session) {
     uvOffsetLocation: gl.getUniformLocation(program, "u_uvOffset"),
     eyeOffsetLocation: gl.getUniformLocation(program, "u_eyeOffset"),
     eyeScaleLocation: gl.getUniformLocation(program, "u_eyeScale"),
+    screenScaleLocation: gl.getUniformLocation(program, "u_screenScale"),
     stereoSbs: false,
     videoReady: false,
     startedAt: performance.now(),
@@ -979,6 +1008,7 @@ function renderWebXrFrame(time, frame) {
     const eyeOffset = xrState.stereoSbs && !isLeftEye ? 0.5 : 0.0;
     const eyeScale = xrState.stereoSbs ? 0.5 : 1.0;
     const layout = getVideoLayout(eyeVideo, xrState.stereoSbs);
+    const screenScale = getScreenContainScale(eyeVideo, xrState.stereoSbs, viewport);
 
     gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
     gl.bindTexture(gl.TEXTURE_2D, eyeTexture);
@@ -995,6 +1025,7 @@ function renderWebXrFrame(time, frame) {
     gl.uniform2fv(xrState.uvOffsetLocation, layout.uvOffset);
     gl.uniform1f(xrState.eyeOffsetLocation, eyeOffset);
     gl.uniform1f(xrState.eyeScaleLocation, eyeScale);
+    gl.uniform2fv(xrState.screenScaleLocation, screenScale);
     gl.drawArrays(gl.TRIANGLES, 0, xrState.vertexCount);
   }
 }
