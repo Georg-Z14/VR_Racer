@@ -516,6 +516,7 @@ function logoutUser() {
 document.addEventListener("DOMContentLoaded", () => {
   setupPasswordToggles();   // Buttons 👁️ aktivieren
   setupEnterShortcuts();    // Enter-Tasten aktivieren
+  setupFullscreenControls();
 
   const savedToken = localStorage.getItem("jwt_token");
   const savedExpiry = localStorage.getItem("jwt_expiry");
@@ -1147,10 +1148,37 @@ async function exitPresentationMode() {
     return;
   }
 
-  if (document.fullscreenElement || document.webkitFullscreenElement) {
-    const exitPromise = document.exitFullscreen?.() || document.webkitExitFullscreen?.();
-    if (exitPromise?.catch) exitPromise.catch(() => {});
+  exitBrowserFullscreen();
+}
+
+function getBrowserFullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function setFullscreenActive(active) {
+  document.body.classList.toggle("fullscreen-active", Boolean(active));
+}
+
+function setupFullscreenControls() {
+  document.addEventListener("fullscreenchange", () => {
+    setFullscreenActive(Boolean(getBrowserFullscreenElement()));
+  });
+  document.addEventListener("webkitfullscreenchange", () => {
+    setFullscreenActive(Boolean(getBrowserFullscreenElement()));
+  });
+  video?.addEventListener("webkitbeginfullscreen", () => setFullscreenActive(true));
+  video?.addEventListener("webkitendfullscreen", () => setFullscreenActive(false));
+}
+
+function exitBrowserFullscreen() {
+  const exitPromise = document.exitFullscreen?.() || document.webkitExitFullscreen?.();
+  if (exitPromise?.catch) exitPromise.catch(() => {});
+
+  if (video?.webkitDisplayingFullscreen && video.webkitExitFullscreen) {
+    video.webkitExitFullscreen();
   }
+
+  setFullscreenActive(false);
 }
 
 async function endWebXrSession() {
@@ -1570,15 +1598,22 @@ function toggleFullscreen() {
     return;
   }
 
-  if (document.fullscreenElement || document.webkitFullscreenElement) {
-    exitPresentationMode();
+  if (getBrowserFullscreenElement() || video?.webkitDisplayingFullscreen) {
+    exitBrowserFullscreen();
     return;
   }
 
-  const target = document.getElementById("vr-sbs-wrap") || video;
+  const target = document.getElementById("vr-sbs-wrap") || document.getElementById("player-wrap") || video;
   if (!target) return;
-  if (target.requestFullscreen) target.requestFullscreen();
-  else if (target.webkitRequestFullscreen) target.webkitRequestFullscreen();
+  const requestPromise = target.requestFullscreen?.() || target.webkitRequestFullscreen?.();
+  if (requestPromise?.catch) {
+    requestPromise.catch(() => {
+      if (video?.webkitEnterFullscreen) video.webkitEnterFullscreen();
+    });
+  } else if (video?.webkitEnterFullscreen && !getBrowserFullscreenElement()) {
+    if (video?.webkitEnterFullscreen) video.webkitEnterFullscreen();
+  }
+  setFullscreenActive(true);
 }
 
 // Seite neu laden (z. B. bei Streamfehler)

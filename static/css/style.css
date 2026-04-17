@@ -206,8 +206,46 @@ video {
   display: block;
 }
 #player-wrap {
+  position: relative;
   aspect-ratio: 16 / 9;
   overflow: hidden;
+}
+#player-wrap:fullscreen,
+#player-wrap:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  aspect-ratio: auto;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+#player-wrap:fullscreen video,
+#player-wrap:-webkit-full-screen video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+#fullscreen-exit-btn {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 20;
+  display: none;
+  padding: 10px 14px;
+  border: 2px solid var(--primary);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+#player-wrap:fullscreen #fullscreen-exit-btn,
+#player-wrap:-webkit-full-screen #fullscreen-exit-btn,
+body.fullscreen-active #fullscreen-exit-btn {
+  display: block;
 }
 #player-wrap iframe {
   width: 100%;
