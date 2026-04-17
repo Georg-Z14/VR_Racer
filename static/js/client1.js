@@ -838,6 +838,9 @@ async function startWebXrSession() {
   } catch (error) {
     const failedSession = xrSession;
     console.warn("WebXR konnte nicht gestartet werden:", error);
+    if (statusTxt) {
+      statusTxt.textContent = `⚠️ WebXR-Fehler: ${error?.name || "unbekannt"}`;
+    }
     cleanupWebXrRenderer();
     if (failedSession) {
       try {
@@ -1296,17 +1299,11 @@ async function toggleView() {
   const targetVr = !vrMode;
   vrMode = targetVr;
   if (targetVr) {
-    vrPreparingWebXr = true;
-    const streamStarted = await switchStreamMode(true);
-    const videoReady = streamStarted ? await waitForVrVideoReady() : false;
-    vrPreparingWebXr = false;
-    if (!streamStarted || !videoReady) {
-      vrMode = false;
-      statusTxt.textContent = "⚠️ VR-Stream nicht bereit";
-      await switchStreamMode(false);
-      return;
-    }
     await enterVrUi();
+    vrPreparingWebXr = true;
+    await switchStreamMode(true);
+    await waitForVrVideoReady();
+    vrPreparingWebXr = false;
   } else {
     vrPreparingWebXr = false;
     await exitVrUi();
