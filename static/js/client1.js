@@ -31,10 +31,9 @@ const DEFAULT_VR_EYE_ASPECT = 16 / 9;
 const XR_STEREO_EYE_ASPECT = readXrNumberParam("xrEyeAspect", DEFAULT_VR_EYE_ASPECT);
 const XR_STEREO_CROP = Math.min(0.08, Math.max(0.0, readSignedXrNumberParam("xrStereoCrop", 0.035)));
 const XR_CONVERGENCE = Math.min(0.08, Math.max(-0.08, readSignedXrNumberParam("xrConvergence", 0.0)));
-const XR_STEREO_STRENGTH = Math.min(1.0, Math.max(0.0, readSignedXrNumberParam("xrStereoStrength", 0.38)));
 const XR_VERTICAL_ALIGN = Math.min(0.06, Math.max(-0.06, readSignedXrNumberParam("xrVerticalAlign", 0.0)));
 const XR_SWAP_EYES = readXrBoolParam("xrSwapEyes", true);
-const XR_MONO = readXrBoolParam("xrMono", false);
+const XR_MONO = readXrBoolParam("xrMono", true);
 let vrEyeAspect = DEFAULT_VR_EYE_ASPECT;
 
 // HUD-Werte (werden später im Stream angezeigt)
@@ -931,7 +930,7 @@ async function createWebXrRenderer(session) {
     uniform float u_eyeScale;
     uniform float u_monoOffset;
     uniform float u_monoScale;
-    uniform float u_stereoStrength;
+    uniform float u_useMono;
     uniform float u_verticalShift;
     varying vec2 v_texCoord;
 
@@ -943,9 +942,8 @@ async function createWebXrRenderer(session) {
       vec2 monoUv = u_uvOffset + v_texCoord * u_uvScale;
       monoUv.x = u_monoOffset + monoUv.x * u_monoScale;
 
-      vec4 monoColor = texture2D(u_texture, monoUv);
-      vec4 stereoColor = texture2D(u_texture, uv);
-      gl_FragColor = mix(monoColor, stereoColor, u_stereoStrength);
+      vec2 finalUv = mix(uv, monoUv, u_useMono);
+      gl_FragColor = texture2D(u_texture, finalUv);
     }
   `);
 
@@ -980,7 +978,7 @@ async function createWebXrRenderer(session) {
     eyeScaleLocation: gl.getUniformLocation(program, "u_eyeScale"),
     monoOffsetLocation: gl.getUniformLocation(program, "u_monoOffset"),
     monoScaleLocation: gl.getUniformLocation(program, "u_monoScale"),
-    stereoStrengthLocation: gl.getUniformLocation(program, "u_stereoStrength"),
+    useMonoLocation: gl.getUniformLocation(program, "u_useMono"),
     verticalShiftLocation: gl.getUniformLocation(program, "u_verticalShift"),
     screenScaleLocation: gl.getUniformLocation(program, "u_screenScale"),
     stereoSbs: false,
@@ -1101,7 +1099,7 @@ function renderWebXrFrame(time, frame) {
     gl.uniform1f(xrState.eyeScaleLocation, stereoWindow.scale);
     gl.uniform1f(xrState.monoOffsetLocation, monoWindow.offset);
     gl.uniform1f(xrState.monoScaleLocation, monoWindow.scale);
-    gl.uniform1f(xrState.stereoStrengthLocation, xrState.stereoSbs && !XR_MONO ? XR_STEREO_STRENGTH : 1.0);
+    gl.uniform1f(xrState.useMonoLocation, xrState.stereoSbs && XR_MONO ? 1.0 : 0.0);
     gl.uniform1f(xrState.verticalShiftLocation, stereoWindow.verticalShift || 0.0);
     gl.uniform2fv(xrState.screenScaleLocation, screenScale);
     gl.drawArrays(gl.TRIANGLES, 0, xrState.vertexCount);
