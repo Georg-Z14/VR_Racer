@@ -16,6 +16,7 @@ let vrRightVideo = null;
 let vrStereoSbs = false;      // True, wenn ein kombinierter Stereo-Stream genutzt wird
 let xrSession = null;         // Echte WebXR-Session für Apple Vision Pro
 let xrState = null;           // WebGL/WebXR-Renderer-State
+let xrVideoHost = null;       // Unsichtbarer Host fuer Safari/visionOS Video-Decoding
 const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
 const XR_RENDER_MODE = new URLSearchParams(window.location.search).get("xrMode") || "curved";
 const XR_DISTANCE_OVERRIDE = readXrNumberParam("xrDistance", null);
@@ -600,13 +601,17 @@ function createXrMesh(horizontalSegments = 64, verticalSegments = 8) {
 }
 
 function updateVideoTexture(gl, texture, videoEl) {
-  if (!videoEl || videoEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+  if (!videoEl || videoEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !videoEl.videoWidth || !videoEl.videoHeight) {
+    return false;
+  }
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
   try {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoEl);
+    return true;
   } catch {
     // Safari kann während des Stream-Wechsels kurzzeitig Frames ablehnen.
+    return false;
   }
 }
 
@@ -648,11 +653,45 @@ function createVrVideo(stream) {
   videoEl.autoplay = true;
   videoEl.playsInline = true;
   videoEl.setAttribute("playsinline", "");
+  videoEl.setAttribute("webkit-playsinline", "");
   videoEl.muted = true;
   videoEl.srcObject = stream;
-  videoEl.addEventListener("loadedmetadata", () => videoEl.play().catch(() => {}), { once: true });
+  videoEl.addEventListener("loadedmetadata", () => videoEl.play().catch(() => {}));
+  videoEl.addEventListener("canplay", () => videoEl.play().catch(() => {}));
   videoEl.play().catch(() => {});
   return videoEl;
+}
+
+function ensureXrVideoHost() {
+  if (xrVideoHost) return xrVideoHost;
+  xrVideoHost = document.createElement("div");
+  xrVideoHost.id = "webxr-video-host";
+  Object.assign(xrVideoHost.style, {
+    position: "fixed",
+    left: "0",
+    top: "0",
+    width: "2px",
+    height: "2px",
+    overflow: "hidden",
+    opacity: "0.01",
+    pointerEvents: "none",
+    zIndex: "-1"
+  });
+  document.body.appendChild(xrVideoHost);
+  return xrVideoHost;
+}
+
+function attachHiddenXrVideo(videoEl) {
+  if (!videoEl) return;
+  const host = ensureXrVideoHost();
+  Object.assign(videoEl.style, {
+    width: "2px",
+    height: "2px",
+    opacity: "0.01",
+    pointerEvents: "none"
+  });
+  if (!host.contains(videoEl)) host.appendChild(videoEl);
+  videoEl.play().catch(() => {});
 }
 
 function createWebXrRenderer(session) {
@@ -753,7 +792,8 @@ function createWebXrRenderer(session) {
     uvOffsetLocation: gl.getUniformLocation(program, "u_uvOffset"),
     eyeOffsetLocation: gl.getUniformLocation(program, "u_eyeOffset"),
     eyeScaleLocation: gl.getUniformLocation(program, "u_eyeScale"),
-    stereoSbs: false
+    stereoSbs: false,
+    videoReady: false
   };
 }
 
@@ -798,8 +838,9 @@ function renderWebXrFrame(time, frame) {
   xrSession.requestAnimationFrame(renderWebXrFrame);
   if (!pose) return;
 
-  updateVideoTexture(gl, xrState.leftTexture, vrLeftVideo);
-  if (!xrState.stereoSbs) updateVideoTexture(gl, xrState.rightTexture, vrRightVideo);
+  const leftTextureReady = updateVideoTexture(gl, xrState.leftTexture, vrLeftVideo);
+  const rightTextureReady = xrState.stereoSbs ? leftTextureReady : updateVideoTexture(gl, xrState.rightTexture, vrRightVideo);
+  xrState.videoReady = Boolean(leftTextureReady && rightTextureReady);
 
   gl.bindFramebuffer(gl.FRAMEBUFFER, baseLayer.framebuffer);
   gl.clearColor(0, 0, 0, 1);
@@ -823,6 +864,11 @@ function renderWebXrFrame(time, frame) {
     const layout = getVideoLayout(eyeVideo, xrState.stereoSbs);
 
     gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+    if (!xrState.videoReady) {
+      gl.clearColor(0.02, 0.02, 0.02, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      continue;
+    }
     gl.bindTexture(gl.TEXTURE_2D, eyeTexture);
     gl.uniformMatrix4fv(xrState.projectionMatrixLocation, false, view.projectionMatrix);
     gl.uniformMatrix4fv(xrState.viewMatrixLocation, false, view.transform.inverse.matrix);
@@ -851,6 +897,10 @@ function cleanupWebXrRenderer() {
       if (xrState.program) gl.deleteProgram(xrState.program);
     }
     if (xrState.canvas) xrState.canvas.remove();
+  }
+  if (xrVideoHost) {
+    xrVideoHost.remove();
+    xrVideoHost = null;
   }
   xrSession = null;
   xrState = null;
@@ -960,6 +1010,8 @@ function attachVrStreams(leftStream, rightStream = null) {
   if (xrSession) {
     vrLeftVideo = createVrVideo(leftStream);
     vrRightVideo = rightStream ? createVrVideo(rightStream) : null;
+    attachHiddenXrVideo(vrLeftVideo);
+    attachHiddenXrVideo(vrRightVideo);
     if (xrState) xrState.stereoSbs = vrStereoSbs;
     monitorFPS(vrLeftVideo);
     statusTxt.textContent = "👓 WebXR-VR verbunden";
