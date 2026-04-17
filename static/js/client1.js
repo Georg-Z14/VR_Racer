@@ -19,10 +19,12 @@ let xrState = null;           // WebGL/WebXR-Renderer-State
 let xrVideoHost = null;       // Unsichtbarer Host fuer Safari/visionOS Video-Decoding
 let vrPreparingWebXr = false; // VR-Stream wird aufgebaut, bevor WebXR startet
 const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
-const XR_RENDER_MODE = new URLSearchParams(window.location.search).get("xrMode") || "screen";
+const XR_RENDER_MODE = new URLSearchParams(window.location.search).get("xrMode") || "curved";
 const XR_DISTANCE_OVERRIDE = readXrNumberParam("xrDistance", null);
 const XR_WIDTH_OVERRIDE = readXrNumberParam("xrWidth", null);
 const XR_FOV_OVERRIDE = readXrNumberParam("xrFov", null);
+const DEFAULT_VR_EYE_ASPECT = 4 / 3;
+let vrEyeAspect = DEFAULT_VR_EYE_ASPECT;
 
 // HUD-Werte (werden später im Stream angezeigt)
 let hudTimer = "⏰ --:--";     // Zeigt verbleibende Login-Zeit
@@ -49,16 +51,18 @@ function getClientProfile(vr) {
   };
 }
 
-function getAdaptiveXrPlane(videoEl) {
-  const videoAspect = videoEl?.videoWidth && videoEl?.videoHeight
+function getAdaptiveXrPlane(videoEl, stereoSbs = false) {
+  const hasVideoSize = videoEl?.videoWidth && videoEl?.videoHeight;
+  const sourceAspect = hasVideoSize
     ? videoEl.videoWidth / videoEl.videoHeight
-    : 16 / 9;
+    : (stereoSbs ? DEFAULT_VR_EYE_ASPECT * 2 : 16 / 9);
+  const videoAspect = stereoSbs ? sourceAspect / 2 : sourceAspect;
   const viewportAspect = window.innerWidth && window.innerHeight
     ? window.innerWidth / window.innerHeight
     : videoAspect;
   const curvedMode = XR_RENDER_MODE !== "plane";
-  const baseDistance = XR_DISTANCE_OVERRIDE || (curvedMode ? 2.4 : Math.max(3.2, Math.min(5.0, 2.8 + (window.devicePixelRatio || 1) * 0.35)));
-  const horizontalFovDeg = XR_FOV_OVERRIDE || (curvedMode ? 92 : 44);
+  const baseDistance = XR_DISTANCE_OVERRIDE || (curvedMode ? 2.8 : Math.max(3.2, Math.min(5.0, 2.8 + (window.devicePixelRatio || 1) * 0.35)));
+  const horizontalFovDeg = XR_FOV_OVERRIDE || (curvedMode ? 72 : 44);
   const fovWidth = 2 * baseDistance * Math.tan((horizontalFovDeg * Math.PI / 180) / 2);
   const baseWidth = XR_WIDTH_OVERRIDE || (curvedMode ? fovWidth : Math.max(1.8, Math.min(3.0, baseDistance * 0.72)));
   const width = viewportAspect < 1 ? baseWidth * 0.85 : baseWidth;
@@ -622,7 +626,7 @@ function updateVideoTexture(gl, texture, videoEl) {
 }
 
 function getVideoLayout(videoEl, stereoSbs = false) {
-  const plane = getAdaptiveXrPlane(videoEl);
+  const plane = getAdaptiveXrPlane(videoEl, stereoSbs);
   const videoWidth = stereoSbs && videoEl?.videoWidth ? videoEl.videoWidth / 2 : videoEl?.videoWidth;
   const videoHeight = videoEl?.videoHeight;
   if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) {
@@ -666,6 +670,43 @@ function createVrVideo(stream) {
   videoEl.addEventListener("canplay", () => videoEl.play().catch(() => {}));
   videoEl.play().catch(() => {});
   return videoEl;
+}
+
+function getVrEyeAspect(videoEl = vrLeftVideo, stereoSbs = vrStereoSbs) {
+  if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) {
+    return DEFAULT_VR_EYE_ASPECT;
+  }
+
+  const sourceAspect = videoEl.videoWidth / videoEl.videoHeight;
+  return stereoSbs ? sourceAspect / 2 : sourceAspect;
+}
+
+function updateVrEyeLayout() {
+  const vrWrap = document.getElementById("vr-sbs-wrap");
+  if (!vrWrap) return;
+
+  vrEyeAspect = getVrEyeAspect();
+
+  const eyeWidth = Math.max(1, window.innerWidth / 2);
+  const eyeHeight = Math.max(1, window.innerHeight);
+  const eyeViewportAspect = eyeWidth / eyeHeight;
+  const frameWidth = eyeViewportAspect > vrEyeAspect ? eyeHeight * vrEyeAspect : eyeWidth;
+  const frameHeight = eyeViewportAspect > vrEyeAspect ? eyeHeight : eyeWidth / vrEyeAspect;
+
+  vrWrap.style.setProperty("--vr-eye-aspect", String(vrEyeAspect));
+  vrWrap.style.setProperty("--vr-frame-width", `${frameWidth}px`);
+  vrWrap.style.setProperty("--vr-frame-height", `${frameHeight}px`);
+}
+
+function configureVrVideoElement(videoEl) {
+  videoEl.autoplay = true;
+  videoEl.playsInline = true;
+  videoEl.setAttribute("playsinline", "");
+  videoEl.setAttribute("webkit-playsinline", "");
+  videoEl.muted = true;
+  videoEl.className = "vr-eye-video";
+  videoEl.addEventListener("loadedmetadata", updateVrEyeLayout);
+  videoEl.addEventListener("canplay", () => videoEl.play().catch(() => {}));
 }
 
 function ensureXrVideoHost() {
@@ -993,34 +1034,28 @@ function ensureVrWrap() {
 
   vrWrap = document.createElement("div");
   vrWrap.id = "vr-sbs-wrap";
-  Object.assign(vrWrap.style, {
-    display: "flex",
-    flexDirection: "row",
-    width: "100vw",
-    height: "100vh",
-    position: "fixed",
-    top: "0",
-    left: "0",
-    zIndex: "9999",
-    background: "black",
-  });
 
   vrLeftVideo = document.createElement("video");
   vrRightVideo = document.createElement("video");
 
-  [vrLeftVideo, vrRightVideo].forEach((v) => {
-    v.autoplay = true;
-    v.playsInline = true;
-    v.muted = true;
-    v.style.width = "50%";
-    v.style.height = "100%";
-    v.style.objectFit = "cover";
-    v.style.background = "black";
-    v.style.transform = "translateZ(0)";
-  });
+  [vrLeftVideo, vrRightVideo].forEach(configureVrVideoElement);
 
-  vrWrap.appendChild(vrLeftVideo);
-  vrWrap.appendChild(vrRightVideo);
+  const leftEye = document.createElement("div");
+  const rightEye = document.createElement("div");
+  const leftFrame = document.createElement("div");
+  const rightFrame = document.createElement("div");
+
+  leftEye.className = "vr-eye vr-eye-left";
+  rightEye.className = "vr-eye vr-eye-right";
+  leftFrame.className = "vr-eye-frame";
+  rightFrame.className = "vr-eye-frame";
+
+  leftFrame.appendChild(vrLeftVideo);
+  rightFrame.appendChild(vrRightVideo);
+  leftEye.appendChild(leftFrame);
+  rightEye.appendChild(rightFrame);
+  vrWrap.appendChild(leftEye);
+  vrWrap.appendChild(rightEye);
 
   const exitBtn = document.createElement("button");
   exitBtn.textContent = "🚪";
@@ -1036,6 +1071,7 @@ function ensureVrWrap() {
   vrWrap.appendChild(exitBtn);
 
   document.body.appendChild(vrWrap);
+  updateVrEyeLayout();
   return vrWrap;
 }
 
@@ -1053,26 +1089,19 @@ function attachVrStreams(leftStream, rightStream = null) {
   }
 
   const vrWrap = ensureVrWrap();
+  vrWrap.classList.toggle("stereo-sbs", vrStereoSbs);
+  vrWrap.classList.toggle("dual-stream", !vrStereoSbs);
   vrWrap.style.display = "flex";
   if (vrLeftVideo) vrLeftVideo.srcObject = leftStream;
-  if (vrRightVideo) vrRightVideo.srcObject = rightStream;
+  if (vrRightVideo) vrRightVideo.srcObject = vrStereoSbs ? leftStream : rightStream;
   if (vrStereoSbs) {
-    if (vrLeftVideo) {
-      vrLeftVideo.style.width = "100%";
-      vrLeftVideo.style.objectFit = "contain";
-    }
-    if (vrRightVideo) vrRightVideo.style.display = "none";
+    if (vrRightVideo) vrRightVideo.style.display = "";
   } else {
-    if (vrLeftVideo) {
-      vrLeftVideo.style.width = "50%";
-      vrLeftVideo.style.objectFit = "cover";
-    }
-    if (vrRightVideo) {
-      vrRightVideo.style.display = "";
-      vrRightVideo.style.width = "50%";
-      vrRightVideo.style.objectFit = "cover";
-    }
+    if (vrRightVideo) vrRightVideo.style.display = "";
   }
+  [vrLeftVideo, vrRightVideo].forEach(v => v?.play().catch(() => {}));
+  updateVrEyeLayout();
+  window.addEventListener("resize", updateVrEyeLayout);
   if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
   if (vrLeftVideo) monitorFPS(vrLeftVideo);
 }
@@ -1280,6 +1309,7 @@ function restoreNormalUi() {
   const hudEl = document.querySelector(".hud");
 
   body.classList.remove("vr-active");
+  window.removeEventListener("resize", updateVrEyeLayout);
   const wrap = document.getElementById("vr-sbs-wrap");
   if (wrap) wrap.remove();
   vrLeftVideo = null;
