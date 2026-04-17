@@ -21,10 +21,11 @@ let vrPreparingWebXr = false; // VR-Stream wird aufgebaut, bevor WebXR startet
 let xrRenderLoopStarted = false;
 let xrTextureErrorLogged = false;
 const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
-const XR_RENDER_MODE = new URLSearchParams(window.location.search).get("xrMode") || "curved";
+const XR_RENDER_MODE = new URLSearchParams(window.location.search).get("xrMode") || "screen";
 const XR_DISTANCE_OVERRIDE = readXrNumberParam("xrDistance", null);
 const XR_WIDTH_OVERRIDE = readXrNumberParam("xrWidth", null);
 const XR_FOV_OVERRIDE = readXrNumberParam("xrFov", null);
+const XR_VIDEO_TIMEOUT_MS = 7000;
 const DEFAULT_VR_EYE_ASPECT = 4 / 3;
 let vrEyeAspect = DEFAULT_VR_EYE_ASPECT;
 
@@ -730,9 +731,9 @@ function ensureXrVideoHost() {
     width: "320px",
     height: "180px",
     overflow: "hidden",
-    opacity: "0.01",
+    opacity: "1",
     pointerEvents: "none",
-    zIndex: "0"
+    zIndex: "9998"
   });
   document.body.appendChild(xrVideoHost);
   return xrVideoHost;
@@ -880,7 +881,9 @@ async function createWebXrRenderer(session) {
     eyeOffsetLocation: gl.getUniformLocation(program, "u_eyeOffset"),
     eyeScaleLocation: gl.getUniformLocation(program, "u_eyeScale"),
     stereoSbs: false,
-    videoReady: false
+    videoReady: false,
+    startedAt: performance.now(),
+    firstVideoFrameAt: 0
   };
 }
 
@@ -903,6 +906,8 @@ async function startWebXrSession() {
       xrState.referenceSpace = await xrSession.requestReferenceSpace("viewer");
     }
     xrSession.addEventListener("end", handleWebXrSessionEnded);
+    document.addEventListener("keydown", handlePresentationExitKey);
+    xrState.canvas.addEventListener("dblclick", exitPresentationMode);
     statusTxt.textContent = "👓 WebXR-VR aktiv";
     return true;
   } catch (error) {
@@ -940,6 +945,17 @@ function renderWebXrFrame(time, frame) {
   const leftTextureReady = updateVideoTexture(gl, xrState.leftTexture, vrLeftVideo);
   const rightTextureReady = xrState.stereoSbs ? leftTextureReady : updateVideoTexture(gl, xrState.rightTexture, vrRightVideo);
   xrState.videoReady = xrState.videoReady || Boolean(leftTextureReady && rightTextureReady);
+  if (xrState.videoReady && !xrState.firstVideoFrameAt) {
+    xrState.firstVideoFrameAt = performance.now();
+    if (statusTxt) statusTxt.textContent = "👓 WebXR-Video sichtbar";
+  }
+
+  if (!xrState.videoReady && performance.now() - xrState.startedAt > XR_VIDEO_TIMEOUT_MS) {
+    console.warn("WebXR beendet: Es konnte kein Videoframe als XR-Textur geladen werden.");
+    showFeedback("⚠️ WebXR zeigt kein Video. Zurück zum Normal-Modus.", "error");
+    endWebXrSession();
+    return;
+  }
 
   gl.bindFramebuffer(gl.FRAMEBUFFER, baseLayer.framebuffer);
   gl.clearColor(0, 0, 0, 1);
@@ -987,6 +1003,7 @@ function cleanupWebXrRenderer() {
   if (xrSession) {
     xrSession.removeEventListener("end", handleWebXrSessionEnded);
   }
+  document.removeEventListener("keydown", handlePresentationExitKey);
   if (xrState) {
     const { gl } = xrState;
     if (gl) {
@@ -1005,6 +1022,27 @@ function cleanupWebXrRenderer() {
   xrState = null;
   xrRenderLoopStarted = false;
   xrTextureErrorLogged = false;
+}
+
+function handlePresentationExitKey(event) {
+  if (event.key === "Escape" || event.key === "Esc" || event.key.toLowerCase() === "x") {
+    event.preventDefault();
+    exitPresentationMode();
+  }
+}
+
+async function exitPresentationMode() {
+  if (xrSession) {
+    await exitVrUi();
+    await switchStreamMode(false);
+    vrMode = false;
+    return;
+  }
+
+  if (document.fullscreenElement || document.webkitFullscreenElement) {
+    const exitPromise = document.exitFullscreen?.() || document.webkitExitFullscreen?.();
+    if (exitPromise?.catch) exitPromise.catch(() => {});
+  }
 }
 
 async function endWebXrSession() {
@@ -1392,6 +1430,16 @@ async function toggleView() {
 
 // Vollbildmodus aktivieren
 function toggleFullscreen() {
+  if (xrSession) {
+    exitPresentationMode();
+    return;
+  }
+
+  if (document.fullscreenElement || document.webkitFullscreenElement) {
+    exitPresentationMode();
+    return;
+  }
+
   const target = document.getElementById("vr-sbs-wrap") || video;
   if (!target) return;
   if (target.requestFullscreen) target.requestFullscreen();
