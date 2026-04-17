@@ -29,6 +29,10 @@ const XR_VIDEO_TIMEOUT_MS = 7000;
 const XR_SCREEN_SCALE = Math.min(0.9, Math.max(0.2, readXrNumberParam("xrScale", 0.42)));
 const DEFAULT_VR_EYE_ASPECT = 16 / 9;
 const XR_STEREO_EYE_ASPECT = readXrNumberParam("xrEyeAspect", DEFAULT_VR_EYE_ASPECT);
+const XR_STEREO_CROP = Math.min(0.08, Math.max(0.0, readSignedXrNumberParam("xrStereoCrop", 0.035)));
+const XR_CONVERGENCE = Math.min(0.08, Math.max(-0.08, readSignedXrNumberParam("xrConvergence", 0.012)));
+const XR_SWAP_EYES = readXrBoolParam("xrSwapEyes", false);
+const XR_MONO = readXrBoolParam("xrMono", false);
 let vrEyeAspect = DEFAULT_VR_EYE_ASPECT;
 
 // HUD-Werte (werden später im Stream angezeigt)
@@ -39,6 +43,17 @@ let hudFps  = "🎥 -- FPS";     // Frames pro Sekunde
 function readXrNumberParam(name, fallback) {
   const value = Number(new URLSearchParams(window.location.search).get(name));
   return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function readXrBoolParam(name, fallback) {
+  const value = new URLSearchParams(window.location.search).get(name);
+  if (value === null) return fallback;
+  return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
+}
+
+function readSignedXrNumberParam(name, fallback) {
+  const value = Number(new URLSearchParams(window.location.search).get(name));
+  return Number.isFinite(value) ? value : fallback;
 }
 
 function getClientProfile(vr) {
@@ -698,6 +713,25 @@ function getScreenContainScale(videoEl, stereoSbs, viewport) {
   return [scaleX, scaleY];
 }
 
+function getStereoUvWindow(isLeftEye, stereoSbs) {
+  if (!stereoSbs) {
+    return { offset: 0.0, scale: 1.0 };
+  }
+
+  const sourceIsLeft = XR_MONO ? !XR_SWAP_EYES : (isLeftEye !== XR_SWAP_EYES);
+  const baseOffset = sourceIsLeft ? 0.0 : 0.5;
+  const scale = Math.max(0.34, 0.5 - 2 * XR_STEREO_CROP);
+  const convergenceShift = XR_MONO ? 0.0 : (sourceIsLeft ? XR_CONVERGENCE : -XR_CONVERGENCE);
+  const rawOffset = baseOffset + XR_STEREO_CROP + convergenceShift;
+  const minOffset = baseOffset;
+  const maxOffset = baseOffset + 0.5 - scale;
+
+  return {
+    offset: Math.min(maxOffset, Math.max(minOffset, rawOffset)),
+    scale
+  };
+}
+
 function createVrVideo(stream) {
   const videoEl = document.createElement("video");
   videoEl.autoplay = true;
@@ -1012,8 +1046,7 @@ function renderWebXrFrame(time, frame) {
     const isLeftEye = view.eye !== "right";
     const eyeVideo = xrState.stereoSbs ? vrLeftVideo : (isLeftEye ? vrLeftVideo : vrRightVideo);
     const eyeTexture = xrState.stereoSbs ? xrState.leftTexture : (isLeftEye ? xrState.leftTexture : xrState.rightTexture);
-    const eyeOffset = xrState.stereoSbs && !isLeftEye ? 0.5 : 0.0;
-    const eyeScale = xrState.stereoSbs ? 0.5 : 1.0;
+    const stereoWindow = getStereoUvWindow(isLeftEye, xrState.stereoSbs);
     const layout = getVideoLayout(eyeVideo, xrState.stereoSbs);
     const screenScale = getScreenContainScale(eyeVideo, xrState.stereoSbs, viewport);
 
@@ -1030,8 +1063,8 @@ function renderWebXrFrame(time, frame) {
     gl.uniform1f(xrState.halfFovLocation, layout.halfFov);
     gl.uniform2fv(xrState.uvScaleLocation, layout.uvScale);
     gl.uniform2fv(xrState.uvOffsetLocation, layout.uvOffset);
-    gl.uniform1f(xrState.eyeOffsetLocation, eyeOffset);
-    gl.uniform1f(xrState.eyeScaleLocation, eyeScale);
+    gl.uniform1f(xrState.eyeOffsetLocation, stereoWindow.offset);
+    gl.uniform1f(xrState.eyeScaleLocation, stereoWindow.scale);
     gl.uniform2fv(xrState.screenScaleLocation, screenScale);
     gl.drawArrays(gl.TRIANGLES, 0, xrState.vertexCount);
   }
