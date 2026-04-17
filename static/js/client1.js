@@ -1399,8 +1399,7 @@ function createOverlay() {
   overlay.className = "control-overlay";
   overlay.innerHTML = `
     <button class="overlay-btn" title="Neu verbinden" onclick="restartStream()">🔄</button>
-    <button class="overlay-btn" title="Vollbild" onclick="toggleFullscreen()">🖥️</button>
-    <button class="overlay-btn" title="VR-Modus" onclick="toggleView()">👓</button>
+    <button class="overlay-btn" title="Vision Pro Ansicht" onclick="enterVisionProMode()">👓</button>
     ${isAdmin ? `<button class="overlay-btn" title="Benutzerverwaltung" onclick="openAdminPanel()">🛠️</button>` : ""}
     <button class="overlay-btn" title="Abmelden" onclick="logoutUser()">🚪</button>
   `;
@@ -1592,6 +1591,13 @@ async function toggleView() {
 ===================================================== */
 
 // Vollbildmodus aktivieren
+function enterVisionProMode() {
+  if (getBrowserFullscreenElement() || video?.webkitDisplayingFullscreen) {
+    return;
+  }
+  toggleFullscreen();
+}
+
 function toggleFullscreen() {
   if (xrSession) {
     exitPresentationMode();
