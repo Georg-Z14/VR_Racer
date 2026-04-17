@@ -13,6 +13,8 @@ let connecting = false;       // Verhindert Doppel-Connects
 let vrStreams = [];           // Streams im VR-Modus (links/rechts)
 let vrLeftVideo = null;
 let vrRightVideo = null;
+let xrSession = null;         // Echte WebXR-Session für Apple Vision Pro
+let xrState = null;           // WebGL/WebXR-Renderer-State
 
 // HUD-Werte (werden später im Stream angezeigt)
 let hudTimer = "⏰ --:--";     // Zeigt verbleibende Login-Zeit
@@ -473,6 +475,293 @@ function resetStreams() {
   if (vrRightVideo) vrRightVideo.srcObject = null;
 }
 
+function compileShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const info = gl.getShaderInfoLog(shader);
+    gl.deleteShader(shader);
+    throw new Error(info || "Shader konnte nicht kompiliert werden");
+  }
+  return shader;
+}
+
+function createProgram(gl, vertexSource, fragmentSource) {
+  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
+  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const info = gl.getProgramInfoLog(program);
+    gl.deleteProgram(program);
+    throw new Error(info || "WebGL-Programm konnte nicht gelinkt werden");
+  }
+  return program;
+}
+
+function createVideoTexture(gl) {
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA,
+    1,
+    1,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    new Uint8Array([0, 0, 0, 255])
+  );
+  return texture;
+}
+
+function updateVideoTexture(gl, texture, videoEl) {
+  if (!videoEl || videoEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  try {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoEl);
+  } catch {
+    // Safari kann während des Stream-Wechsels kurzzeitig Frames ablehnen.
+  }
+}
+
+function getCoverUv(videoEl, viewport) {
+  if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight || !viewport.width || !viewport.height) {
+    return { scale: [1, 1], offset: [0, 0] };
+  }
+
+  const videoAspect = videoEl.videoWidth / videoEl.videoHeight;
+  const viewportAspect = viewport.width / viewport.height;
+  let scaleX = 1;
+  let scaleY = 1;
+
+  if (videoAspect > viewportAspect) {
+    scaleX = viewportAspect / videoAspect;
+  } else {
+    scaleY = videoAspect / viewportAspect;
+  }
+
+  return {
+    scale: [scaleX, scaleY],
+    offset: [(1 - scaleX) / 2, (1 - scaleY) / 2]
+  };
+}
+
+function createVrVideo(stream) {
+  const videoEl = document.createElement("video");
+  videoEl.autoplay = true;
+  videoEl.playsInline = true;
+  videoEl.setAttribute("playsinline", "");
+  videoEl.muted = true;
+  videoEl.srcObject = stream;
+  videoEl.addEventListener("loadedmetadata", () => videoEl.play().catch(() => {}), { once: true });
+  videoEl.play().catch(() => {});
+  return videoEl;
+}
+
+function createWebXrRenderer(session) {
+  const canvas = document.createElement("canvas");
+  canvas.id = "webxr-vr-canvas";
+  Object.assign(canvas.style, {
+    position: "fixed",
+    top: "0",
+    left: "0",
+    width: "100vw",
+    height: "100vh",
+    zIndex: "9999",
+    background: "black"
+  });
+  document.body.appendChild(canvas);
+
+  const gl = canvas.getContext("webgl", {
+    alpha: false,
+    antialias: true,
+    xrCompatible: true
+  });
+  if (!gl) throw new Error("WebGL wird auf diesem Gerät nicht unterstützt");
+
+  const program = createProgram(gl, `
+    attribute vec2 a_position;
+    attribute vec2 a_texCoord;
+    varying vec2 v_texCoord;
+
+    void main() {
+      gl_Position = vec4(a_position, 0.0, 1.0);
+      v_texCoord = a_texCoord;
+    }
+  `, `
+    precision mediump float;
+    uniform sampler2D u_texture;
+    uniform vec2 u_uvScale;
+    uniform vec2 u_uvOffset;
+    varying vec2 v_texCoord;
+
+    void main() {
+      vec2 uv = u_uvOffset + v_texCoord * u_uvScale;
+      gl_FragColor = texture2D(u_texture, uv);
+    }
+  `);
+
+  const vertexBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1, 0, 0,
+     1, -1, 1, 0,
+    -1,  1, 0, 1,
+    -1,  1, 0, 1,
+     1, -1, 1, 0,
+     1,  1, 1, 1
+  ]), gl.STATIC_DRAW);
+
+  return {
+    session,
+    canvas,
+    gl,
+    program,
+    vertexBuffer,
+    baseLayer: null,
+    referenceSpace: null,
+    leftTexture: createVideoTexture(gl),
+    rightTexture: createVideoTexture(gl),
+    positionLocation: gl.getAttribLocation(program, "a_position"),
+    texCoordLocation: gl.getAttribLocation(program, "a_texCoord"),
+    textureLocation: gl.getUniformLocation(program, "u_texture"),
+    uvScaleLocation: gl.getUniformLocation(program, "u_uvScale"),
+    uvOffsetLocation: gl.getUniformLocation(program, "u_uvOffset")
+  };
+}
+
+async function startWebXrSession() {
+  if (!navigator.xr || !navigator.xr.requestSession) {
+    showFeedback("WebXR-VR ist nicht verfügbar. Side-by-Side wird genutzt.", "error");
+    return false;
+  }
+
+  try {
+    xrSession = await navigator.xr.requestSession("immersive-vr", {
+      optionalFeatures: ["local-floor", "hand-tracking"]
+    });
+    xrState = createWebXrRenderer(xrSession);
+    if (xrState.gl.makeXRCompatible) await xrState.gl.makeXRCompatible();
+    xrState.baseLayer = new XRWebGLLayer(xrSession, xrState.gl);
+    xrSession.updateRenderState({ baseLayer: xrState.baseLayer });
+    xrState.referenceSpace = await xrSession.requestReferenceSpace("local-floor")
+      .catch(() => xrSession.requestReferenceSpace("local"));
+    xrSession.addEventListener("end", handleWebXrSessionEnded);
+    xrSession.requestAnimationFrame(renderWebXrFrame);
+    statusTxt.textContent = "👓 WebXR-VR aktiv";
+    return true;
+  } catch (error) {
+    const failedSession = xrSession;
+    console.warn("WebXR konnte nicht gestartet werden:", error);
+    cleanupWebXrRenderer();
+    if (failedSession) {
+      try {
+        await failedSession.end();
+      } catch {}
+    }
+    showFeedback("WebXR konnte nicht gestartet werden. Side-by-Side wird genutzt.", "error");
+    return false;
+  }
+}
+
+function renderWebXrFrame(time, frame) {
+  if (!xrSession || !xrState) return;
+
+  const { gl, program, vertexBuffer, baseLayer, referenceSpace } = xrState;
+  const pose = frame.getViewerPose(referenceSpace);
+  xrSession.requestAnimationFrame(renderWebXrFrame);
+  if (!pose) return;
+
+  updateVideoTexture(gl, xrState.leftTexture, vrLeftVideo);
+  updateVideoTexture(gl, xrState.rightTexture, vrRightVideo);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, baseLayer.framebuffer);
+  gl.clearColor(0, 0, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+  gl.enableVertexAttribArray(xrState.positionLocation);
+  gl.vertexAttribPointer(xrState.positionLocation, 2, gl.FLOAT, false, 16, 0);
+  gl.enableVertexAttribArray(xrState.texCoordLocation);
+  gl.vertexAttribPointer(xrState.texCoordLocation, 2, gl.FLOAT, false, 16, 8);
+  gl.uniform1i(xrState.textureLocation, 0);
+  gl.activeTexture(gl.TEXTURE0);
+
+  for (const view of pose.views) {
+    const viewport = baseLayer.getViewport(view);
+    const isLeftEye = view.eye !== "right";
+    const eyeVideo = isLeftEye ? vrLeftVideo : vrRightVideo;
+    const eyeTexture = isLeftEye ? xrState.leftTexture : xrState.rightTexture;
+    const uv = getCoverUv(eyeVideo, viewport);
+
+    gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+    gl.bindTexture(gl.TEXTURE_2D, eyeTexture);
+    gl.uniform2fv(xrState.uvScaleLocation, uv.scale);
+    gl.uniform2fv(xrState.uvOffsetLocation, uv.offset);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+}
+
+function cleanupWebXrRenderer() {
+  if (xrSession) {
+    xrSession.removeEventListener("end", handleWebXrSessionEnded);
+  }
+  if (xrState) {
+    const { gl } = xrState;
+    if (gl) {
+      if (xrState.leftTexture) gl.deleteTexture(xrState.leftTexture);
+      if (xrState.rightTexture) gl.deleteTexture(xrState.rightTexture);
+      if (xrState.vertexBuffer) gl.deleteBuffer(xrState.vertexBuffer);
+      if (xrState.program) gl.deleteProgram(xrState.program);
+    }
+    if (xrState.canvas) xrState.canvas.remove();
+  }
+  xrSession = null;
+  xrState = null;
+}
+
+async function endWebXrSession() {
+  const session = xrSession;
+  if (!session) {
+    cleanupWebXrRenderer();
+    return;
+  }
+  try {
+    await session.end();
+  } catch {
+    cleanupWebXrRenderer();
+  }
+}
+
+function handleWebXrSessionEnded() {
+  const shouldReturnToNormal = vrMode;
+  cleanupWebXrRenderer();
+  if (shouldReturnToNormal) {
+    vrMode = false;
+    returnToNormalAfterXrEnd();
+  }
+}
+
+async function returnToNormalAfterXrEnd() {
+  restoreNormalUi();
+  for (let i = 0; connecting && i < 30; i++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  await switchStreamMode(false);
+}
+
 async function stopConnection() {
   if (pc) {
     pc.ontrack = null;
@@ -543,6 +832,14 @@ function ensureVrWrap() {
 }
 
 function attachVrStreams(leftStream, rightStream) {
+  if (xrSession) {
+    vrLeftVideo = createVrVideo(leftStream);
+    vrRightVideo = createVrVideo(rightStream);
+    monitorFPS(vrRightVideo);
+    statusTxt.textContent = "👓 WebXR-VR verbunden";
+    return;
+  }
+
   const vrWrap = ensureVrWrap();
   vrWrap.style.display = "flex";
   if (vrLeftVideo) vrLeftVideo.srcObject = leftStream;
@@ -700,10 +997,10 @@ function monitorFPS(videoEl) {
 }
 
 /* =====================================================
-   ✅ VR-VOLLANSICHT (Side-by-Side)
+   ✅ VR-VOLLANSICHT (WebXR mit Side-by-Side-Fallback)
 ===================================================== */
 
-function enterVrUi() {
+async function enterVrUi() {
   const body = document.body;
   const header = document.querySelector("header");
   const loginCard = document.getElementById("login-card");
@@ -720,14 +1017,19 @@ function enterVrUi() {
   if (overlay) overlay.style.display = "none";
   if (hudEl) hudEl.style.display = "none";
 
-  const vrWrap = ensureVrWrap();
-  vrWrap.style.display = "flex";
   body.classList.add("vr-active");
-  if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
-  statusTxt.textContent = "👓 VR-Modus aktiv";
+  statusTxt.textContent = "👓 Starte WebXR-VR...";
+
+  const webXrStarted = await startWebXrSession();
+  if (!webXrStarted) {
+    const vrWrap = ensureVrWrap();
+    vrWrap.style.display = "flex";
+    if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
+    statusTxt.textContent = "👓 Side-by-Side-VR aktiv";
+  }
 }
 
-function exitVrUi() {
+function restoreNormalUi() {
   const body = document.body;
   const header = document.querySelector("header");
   const footer = document.querySelector("footer");
@@ -747,8 +1049,14 @@ function exitVrUi() {
   if (overlay) overlay.style.display = "";
   if (hudEl) hudEl.style.display = "";
 
-  document.exitFullscreen?.().catch(() => {});
+  const exitFullscreenPromise = document.exitFullscreen?.();
+  if (exitFullscreenPromise?.catch) exitFullscreenPromise.catch(() => {});
   statusTxt.textContent = "🖥 Normal-Modus";
+}
+
+async function exitVrUi() {
+  await endWebXrSession();
+  restoreNormalUi();
 }
 
 async function switchStreamMode(vr) {
@@ -763,10 +1071,10 @@ async function toggleView() {
   const targetVr = !vrMode;
   vrMode = targetVr;
   if (targetVr) {
-    enterVrUi();
+    await enterVrUi();
     await switchStreamMode(true);
   } else {
-    exitVrUi();
+    await exitVrUi();
     await switchStreamMode(false);
   }
 }
