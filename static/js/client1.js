@@ -565,12 +565,17 @@ function createVideoTexture(gl) {
     gl.TEXTURE_2D,
     0,
     gl.RGBA,
-    1,
-    1,
+    2,
+    2,
     0,
     gl.RGBA,
     gl.UNSIGNED_BYTE,
-    new Uint8Array([0, 0, 0, 255])
+    new Uint8Array([
+      0, 120, 255, 255,
+      255, 255, 255, 255,
+      255, 255, 255, 255,
+      0, 220, 120, 255
+    ])
   );
   return texture;
 }
@@ -669,14 +674,14 @@ function ensureXrVideoHost() {
   xrVideoHost.id = "webxr-video-host";
   Object.assign(xrVideoHost.style, {
     position: "fixed",
-    left: "0",
+    left: "-20px",
     top: "0",
-    width: "2px",
-    height: "2px",
+    width: "4px",
+    height: "4px",
     overflow: "hidden",
-    opacity: "0.01",
+    opacity: "1",
     pointerEvents: "none",
-    zIndex: "-1"
+    zIndex: "9998"
   });
   document.body.appendChild(xrVideoHost);
   return xrVideoHost;
@@ -686,9 +691,9 @@ function attachHiddenXrVideo(videoEl) {
   if (!videoEl) return;
   const host = ensureXrVideoHost();
   Object.assign(videoEl.style, {
-    width: "2px",
-    height: "2px",
-    opacity: "0.01",
+    width: "4px",
+    height: "4px",
+    opacity: "1",
     pointerEvents: "none"
   });
   if (!host.contains(videoEl)) host.appendChild(videoEl);
@@ -862,7 +867,7 @@ function renderWebXrFrame(time, frame) {
 
   const leftTextureReady = updateVideoTexture(gl, xrState.leftTexture, vrLeftVideo);
   const rightTextureReady = xrState.stereoSbs ? leftTextureReady : updateVideoTexture(gl, xrState.rightTexture, vrRightVideo);
-  xrState.videoReady = Boolean(leftTextureReady && rightTextureReady);
+  xrState.videoReady = xrState.videoReady || Boolean(leftTextureReady && rightTextureReady);
 
   gl.bindFramebuffer(gl.FRAMEBUFFER, baseLayer.framebuffer);
   gl.clearColor(0, 0, 0, 1);
@@ -888,11 +893,6 @@ function renderWebXrFrame(time, frame) {
     const layout = getVideoLayout(eyeVideo, xrState.stereoSbs);
 
     gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
-    if (!xrState.videoReady) {
-      gl.clearColor(0.02, 0.02, 0.02, 1);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      continue;
-    }
     gl.bindTexture(gl.TEXTURE_2D, eyeTexture);
     gl.uniformMatrix4fv(xrState.projectionMatrixLocation, false, view.projectionMatrix);
     gl.uniformMatrix4fv(xrState.viewMatrixLocation, false, view.transform.inverse.matrix);
