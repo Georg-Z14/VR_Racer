@@ -6,10 +6,11 @@ Verbesserungen:
 - Ruhiger Servo (angepasste Pulsbreite, Filtering, Smoothing)
 - Servo wird bei Neutralstellung deaktiviert (detach)
 - Controller-Erkennung generisch (keine feste Namenssuche)
-- Auswahl bei mehreren Eingabegeräten
+- automatische Auswahl bei mehreren Eingabegeräten
 - Sauberes Cleanup bei Abbruch
 """
 
+import os
 import sys
 import time
 
@@ -37,6 +38,7 @@ MOTOR_IN2 = 27
 MOTOR_ENA = 12                # PWM Geschwindigkeit
 
 PWM_FREQUENCY = 1000          # PWM Frequenz für Motor
+CONTROLLER_DEVICE_PATH = os.getenv("CONTROLLER_DEVICE_PATH", "").strip()
 
 
 # =========================
@@ -160,8 +162,14 @@ def find_controller():
     Sucht generisch nach Eingabegeräten mit Analogachsen.
     Gibt:
     - direkt Gerät zurück (wenn nur eins gefunden)
-    - Auswahlmenü (wenn mehrere vorhanden)
+    - automatische Auswahl (wenn mehrere vorhanden)
     """
+
+    if CONTROLLER_DEVICE_PATH:
+        try:
+            return InputDevice(CONTROLLER_DEVICE_PATH)
+        except Exception:
+            print(f"Controller-Pfad nicht verfügbar: {CONTROLLER_DEVICE_PATH}")
 
     devices = []
 
@@ -185,17 +193,9 @@ def find_controller():
     if len(devices) == 1:
         return devices[0]
 
-    # Mehrere Geräte -> Auswahl anzeigen
-    print("\nGefundene Eingabegeräte:")
-    for i, dev in enumerate(devices):
-        print(f"{i}: {dev.name} ({dev.path})")
-
-    while True:
-        try:
-            idx = int(input("Wähle Controller Nummer: "))
-            return devices[idx]
-        except Exception:
-            print("Ungültige Eingabe")
+    selected = devices[0]
+    print(f"Mehrere Eingabegeräte gefunden, nutze automatisch: {selected.name} ({selected.path})")
+    return selected
 
 
 # =========================

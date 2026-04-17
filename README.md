@@ -9,7 +9,7 @@ VR_Racer/
 ├── run_secure_cached.sh
 ├── server.py
 ├── Steuerung_VR_Racer/
-│   └── Steuerung_OHNE_Shutdown.py
+│   └── Steuerung_stable.py
 ├── static/
 │   ├── css/
 │   ├── js/
@@ -19,6 +19,7 @@ VR_Racer/
 ```
 
 Lokale Dateien wie `.env`, `users.db`, `secret.key` und `venv/` bleiben auf dem Raspberry Pi, werden aber nicht ins Git-Repo committed.
+Als Vorlage fuer neue Installationen dient `.env.example`.
 
 ## Raspberry Pi Setup
 
@@ -37,6 +38,7 @@ python3 -m venv --system-site-packages venv
 source venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements-pi.txt
+cp .env.example .env
 chmod +x run_secure_cached.sh
 ```
 
@@ -91,7 +93,7 @@ Start:
 ```bash
 cd ~/VR_Racer
 source venv/bin/activate
-python3 Steuerung_VR_Racer/Steuerung_OHNE_Shutdown.py
+python3 Steuerung_VR_Racer/Steuerung_stable.py
 ```
 
 Falls der Benutzer keine Rechte auf Controller/GPIO hat:
@@ -122,7 +124,7 @@ scan off
 quit
 ```
 
-Wenn `PS5_CONTROLLER_MAC` in `.env` gesetzt ist, nutzt das Steuerungsskript nur diesen Controller.
+Die Steuerung fragt beim Start nicht interaktiv nach einem Eingabegeraet, damit der systemd-Dienst nicht haengen bleibt. Falls automatisch das falsche Eingabegeraet gewaehlt wird, kann in `.env` optional `CONTROLLER_DEVICE_PATH=/dev/input/...` gesetzt werden.
 
 ## Autostart nach Akkuwechsel
 

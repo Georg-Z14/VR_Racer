@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 set -euo pipefail
 # → Bricht bei Fehlern ab (-e)
 # → Unbenutzte Variablen werden als Fehler behandelt (-u)
