@@ -12,6 +12,8 @@ SERVER_SCRIPT="server.py"        # Python-Server, der gestartet werden soll
 VENV_DIR="${VENV_DIR:-venv}"
 PYTHON_BIN="${PYTHON_BIN:-${VENV_DIR}/bin/python}"   # Python-Interpreter (immer venv)
 # Ausgabe bleibt auf STDOUT/STDERR – keine server.log mehr
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
 
 # ======================================================
 # 🧩 GRUNDPRÜFUNG
