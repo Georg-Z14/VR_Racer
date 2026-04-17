@@ -16,11 +16,18 @@ let vrRightVideo = null;
 let xrSession = null;         // Echte WebXR-Session für Apple Vision Pro
 let xrState = null;           // WebGL/WebXR-Renderer-State
 const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
+const XR_VIDEO_DISTANCE = readXrNumberParam("xrDistance", 3.2);
+const XR_VIDEO_WIDTH = readXrNumberParam("xrWidth", 2.6);
 
 // HUD-Werte (werden später im Stream angezeigt)
 let hudTimer = "⏰ --:--";     // Zeigt verbleibende Login-Zeit
 let hudPing = "📡 -- ms";      // Netzwerkverzögerung
 let hudFps  = "🎥 -- FPS";     // Frames pro Sekunde
+
+function readXrNumberParam(name, fallback) {
+  const value = Number(new URLSearchParams(window.location.search).get(name));
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 /* =====================================================
    🔑 LOGIN / REGISTRIERUNG (JWT)
@@ -537,42 +544,27 @@ function updateVideoTexture(gl, texture, videoEl) {
   }
 }
 
-function getVideoLayout(videoEl, viewport) {
-  if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight || !viewport.width || !viewport.height) {
-    return { positionScale: [1, 1], uvScale: [1, 1], uvOffset: [0, 0] };
-  }
-
-  const videoAspect = videoEl.videoWidth / videoEl.videoHeight;
-  const viewportAspect = viewport.width / viewport.height;
-
-  if (XR_VIDEO_FIT_MODE === "cover") {
-    let uvScaleX = 1;
-    let uvScaleY = 1;
-
-    if (videoAspect > viewportAspect) {
-      uvScaleX = viewportAspect / videoAspect;
-    } else {
-      uvScaleY = videoAspect / viewportAspect;
-    }
-
+function getVideoLayout(videoEl) {
+  if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) {
     return {
-      positionScale: [1, 1],
-      uvScale: [uvScaleX, uvScaleY],
-      uvOffset: [(1 - uvScaleX) / 2, (1 - uvScaleY) / 2]
+      planeScale: [XR_VIDEO_WIDTH / 2, (XR_VIDEO_WIDTH / (16 / 9)) / 2],
+      uvScale: [1, 1],
+      uvOffset: [0, 0]
     };
   }
 
-  let positionScaleX = 1;
-  let positionScaleY = 1;
+  const videoAspect = videoEl.videoWidth / videoEl.videoHeight;
 
-  if (videoAspect > viewportAspect) {
-    positionScaleY = viewportAspect / videoAspect;
-  } else {
-    positionScaleX = videoAspect / viewportAspect;
+  if (XR_VIDEO_FIT_MODE === "cover") {
+    return {
+      planeScale: [XR_VIDEO_WIDTH / 2, (XR_VIDEO_WIDTH / videoAspect) / 2],
+      uvScale: [1, 1],
+      uvOffset: [0, 0]
+    };
   }
 
   return {
-    positionScale: [positionScaleX, positionScaleY],
+    planeScale: [XR_VIDEO_WIDTH / 2, (XR_VIDEO_WIDTH / videoAspect) / 2],
     uvScale: [1, 1],
     uvOffset: [0, 0]
   };
@@ -614,11 +606,20 @@ function createWebXrRenderer(session) {
   const program = createProgram(gl, `
     attribute vec2 a_position;
     attribute vec2 a_texCoord;
-    uniform vec2 u_positionScale;
+    uniform mat4 u_projectionMatrix;
+    uniform mat4 u_viewMatrix;
+    uniform vec2 u_planeScale;
+    uniform float u_planeDistance;
     varying vec2 v_texCoord;
 
     void main() {
-      gl_Position = vec4(a_position * u_positionScale, 0.0, 1.0);
+      vec4 worldPosition = vec4(
+        a_position.x * u_planeScale.x,
+        a_position.y * u_planeScale.y,
+        -u_planeDistance,
+        1.0
+      );
+      gl_Position = u_projectionMatrix * u_viewMatrix * worldPosition;
       v_texCoord = a_texCoord;
     }
   `, `
@@ -657,7 +658,10 @@ function createWebXrRenderer(session) {
     rightTexture: createVideoTexture(gl),
     positionLocation: gl.getAttribLocation(program, "a_position"),
     texCoordLocation: gl.getAttribLocation(program, "a_texCoord"),
-    positionScaleLocation: gl.getUniformLocation(program, "u_positionScale"),
+    projectionMatrixLocation: gl.getUniformLocation(program, "u_projectionMatrix"),
+    viewMatrixLocation: gl.getUniformLocation(program, "u_viewMatrix"),
+    planeScaleLocation: gl.getUniformLocation(program, "u_planeScale"),
+    planeDistanceLocation: gl.getUniformLocation(program, "u_planeDistance"),
     textureLocation: gl.getUniformLocation(program, "u_texture"),
     uvScaleLocation: gl.getUniformLocation(program, "u_uvScale"),
     uvOffsetLocation: gl.getUniformLocation(program, "u_uvOffset")
@@ -678,8 +682,7 @@ async function startWebXrSession() {
     if (xrState.gl.makeXRCompatible) await xrState.gl.makeXRCompatible();
     xrState.baseLayer = new XRWebGLLayer(xrSession, xrState.gl);
     xrSession.updateRenderState({ baseLayer: xrState.baseLayer });
-    xrState.referenceSpace = await xrSession.requestReferenceSpace("local-floor")
-      .catch(() => xrSession.requestReferenceSpace("local"));
+    xrState.referenceSpace = await xrSession.requestReferenceSpace("viewer");
     xrSession.addEventListener("end", handleWebXrSessionEnded);
     xrSession.requestAnimationFrame(renderWebXrFrame);
     statusTxt.textContent = "👓 WebXR-VR aktiv";
@@ -726,11 +729,14 @@ function renderWebXrFrame(time, frame) {
     const isLeftEye = view.eye !== "right";
     const eyeVideo = isLeftEye ? vrLeftVideo : vrRightVideo;
     const eyeTexture = isLeftEye ? xrState.leftTexture : xrState.rightTexture;
-    const layout = getVideoLayout(eyeVideo, viewport);
+    const layout = getVideoLayout(eyeVideo);
 
     gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
     gl.bindTexture(gl.TEXTURE_2D, eyeTexture);
-    gl.uniform2fv(xrState.positionScaleLocation, layout.positionScale);
+    gl.uniformMatrix4fv(xrState.projectionMatrixLocation, false, view.projectionMatrix);
+    gl.uniformMatrix4fv(xrState.viewMatrixLocation, false, view.transform.inverse.matrix);
+    gl.uniform2fv(xrState.planeScaleLocation, layout.planeScale);
+    gl.uniform1f(xrState.planeDistanceLocation, XR_VIDEO_DISTANCE);
     gl.uniform2fv(xrState.uvScaleLocation, layout.uvScale);
     gl.uniform2fv(xrState.uvOffsetLocation, layout.uvOffset);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
