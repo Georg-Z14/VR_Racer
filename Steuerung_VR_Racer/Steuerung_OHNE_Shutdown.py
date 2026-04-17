@@ -9,10 +9,16 @@
 
 #!/usr/bin/env python3
 import os
+import sys
 import time
 from gpiozero import Servo, PWMOutputDevice, OutputDevice
 from gpiozero.pins.lgpio import LGPIOFactory
 from evdev import InputDevice, ecodes, list_devices
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # ─────────────────────────────────────
 # GPIO SETUP
