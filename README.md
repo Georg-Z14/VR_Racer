@@ -62,6 +62,22 @@ In einem zweiten Terminal:
 cloudflared tunnel --url http://localhost:8080
 ```
 
+## Apple Vision Pro VR
+
+Im VR-Modus sendet der Server einen kombinierten Stereo-Stream: linke Kamera links im Bild, rechte Kamera rechts im Bild. Die Webseite trennt diesen Stream im WebXR-Renderer wieder pro Auge. Das ist fuer die Vision Pro weiterhin echter `immersive-vr` Modus; Side-by-Side ist nur das Transportformat.
+
+Empfohlene Pi-Einstellungen in `.env` fuer stabile FPS:
+
+```bash
+CAMERA_SIZE=960x720
+CAMERA_MAX_FPS=30
+CAMERA_BUFFER_COUNT=1
+CAMERA_QUEUE=0
+CAMERA_COLOR_CONVERT=none
+```
+
+Wenn die FPS stabil bleiben, kann `CAMERA_SIZE=1280x720` getestet werden. Falls das Bild zu nah wirkt, kann die Vision-Pro-URL testweise mit `?xrDistance=2.8&xrFov=85` geoeffnet werden.
+
 ## PS5 Controller
 
 Die Steuerung braucht diese Raspberry-Pi-Pakete aus `requirements-pi.txt`:

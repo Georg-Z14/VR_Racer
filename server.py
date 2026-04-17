@@ -14,7 +14,7 @@ from typing import List, Dict, Optional
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaRelay
-from camera_stream import CameraProcess
+from camera_stream import CameraProcess, StereoSharedMemoryCameraStream
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
@@ -146,13 +146,19 @@ class CameraManager:
                     self.camera_left_track = None
 
     def get_tracks(self, vr_mode: bool):
-        track_right = self._relay.subscribe(self.camera_right_track)
         if not vr_mode:
-            return [track_right]
-        if self.camera_left_track is None:
+            return [self._relay.subscribe(self.camera_right_track)]
+        if self.camera_left_proc is None:
             raise RuntimeError("Kamera links ist nicht verfügbar")
-        track_left = self._relay.subscribe(self.camera_left_track)
-        return [track_left, track_right]
+        stereo_track = StereoSharedMemoryCameraStream(
+            self.camera_left_proc.shm_name,
+            self.camera_right_proc.shm_name,
+            self._target_size,
+            self.camera_left_proc.lock,
+            self.camera_right_proc.lock,
+            CAMERA_FRAME_FORMAT,
+        )
+        return [stereo_track]
 
     def stop_all(self):
         if self.camera_right_proc:

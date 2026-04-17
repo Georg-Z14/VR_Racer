@@ -13,6 +13,7 @@ let connecting = false;       // Verhindert Doppel-Connects
 let vrStreams = [];           // Streams im VR-Modus (links/rechts)
 let vrLeftVideo = null;
 let vrRightVideo = null;
+let vrStereoSbs = false;      // True, wenn ein kombinierter Stereo-Stream genutzt wird
 let xrSession = null;         // Echte WebXR-Session für Apple Vision Pro
 let xrState = null;           // WebGL/WebXR-Renderer-State
 const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
@@ -516,6 +517,7 @@ const statusTxt = document.getElementById("status"); // Statusanzeige
 function resetStreams() {
   currentStream = null;
   vrStreams = [];
+  vrStereoSbs = false;
   if (video) video.srcObject = null;
   if (vrLeftVideo) vrLeftVideo.srcObject = null;
   if (vrRightVideo) vrRightVideo.srcObject = null;
@@ -608,8 +610,10 @@ function updateVideoTexture(gl, texture, videoEl) {
   }
 }
 
-function getVideoLayout(videoEl) {
+function getVideoLayout(videoEl, stereoSbs = false) {
   const plane = getAdaptiveXrPlane(videoEl);
+  const videoWidth = stereoSbs && videoEl?.videoWidth ? videoEl.videoWidth / 2 : videoEl?.videoWidth;
+  const videoHeight = videoEl?.videoHeight;
   if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) {
     return {
       distance: plane.distance,
@@ -619,10 +623,13 @@ function getVideoLayout(videoEl) {
     };
   }
 
+  const videoAspect = videoWidth && videoHeight ? videoWidth / videoHeight : 16 / 9;
+  const eyeHeight = plane.width / videoAspect;
+
   if (XR_VIDEO_FIT_MODE === "cover") {
     return {
       distance: plane.distance,
-      planeScale: [plane.width / 2, plane.height / 2],
+      planeScale: [plane.width / 2, eyeHeight / 2],
       uvScale: [1, 1],
       uvOffset: [0, 0]
     };
@@ -630,7 +637,7 @@ function getVideoLayout(videoEl) {
 
   return {
     distance: plane.distance,
-    planeScale: [plane.width / 2, plane.height / 2],
+    planeScale: [plane.width / 2, eyeHeight / 2],
     uvScale: [1, 1],
     uvOffset: [0, 0]
   };
@@ -706,10 +713,13 @@ function createWebXrRenderer(session) {
     uniform sampler2D u_texture;
     uniform vec2 u_uvScale;
     uniform vec2 u_uvOffset;
+    uniform float u_eyeOffset;
+    uniform float u_eyeScale;
     varying vec2 v_texCoord;
 
     void main() {
       vec2 uv = u_uvOffset + v_texCoord * u_uvScale;
+      uv.x = u_eyeOffset + uv.x * u_eyeScale;
       gl_FragColor = texture2D(u_texture, uv);
     }
   `);
@@ -740,7 +750,10 @@ function createWebXrRenderer(session) {
     halfFovLocation: gl.getUniformLocation(program, "u_halfFov"),
     textureLocation: gl.getUniformLocation(program, "u_texture"),
     uvScaleLocation: gl.getUniformLocation(program, "u_uvScale"),
-    uvOffsetLocation: gl.getUniformLocation(program, "u_uvOffset")
+    uvOffsetLocation: gl.getUniformLocation(program, "u_uvOffset"),
+    eyeOffsetLocation: gl.getUniformLocation(program, "u_eyeOffset"),
+    eyeScaleLocation: gl.getUniformLocation(program, "u_eyeScale"),
+    stereoSbs: false
   };
 }
 
@@ -786,7 +799,7 @@ function renderWebXrFrame(time, frame) {
   if (!pose) return;
 
   updateVideoTexture(gl, xrState.leftTexture, vrLeftVideo);
-  updateVideoTexture(gl, xrState.rightTexture, vrRightVideo);
+  if (!xrState.stereoSbs) updateVideoTexture(gl, xrState.rightTexture, vrRightVideo);
 
   gl.bindFramebuffer(gl.FRAMEBUFFER, baseLayer.framebuffer);
   gl.clearColor(0, 0, 0, 1);
@@ -803,9 +816,11 @@ function renderWebXrFrame(time, frame) {
   for (const view of pose.views) {
     const viewport = baseLayer.getViewport(view);
     const isLeftEye = view.eye !== "right";
-    const eyeVideo = isLeftEye ? vrLeftVideo : vrRightVideo;
-    const eyeTexture = isLeftEye ? xrState.leftTexture : xrState.rightTexture;
-    const layout = getVideoLayout(eyeVideo);
+    const eyeVideo = xrState.stereoSbs ? vrLeftVideo : (isLeftEye ? vrLeftVideo : vrRightVideo);
+    const eyeTexture = xrState.stereoSbs ? xrState.leftTexture : (isLeftEye ? xrState.leftTexture : xrState.rightTexture);
+    const eyeOffset = xrState.stereoSbs && !isLeftEye ? 0.5 : 0.0;
+    const eyeScale = xrState.stereoSbs ? 0.5 : 1.0;
+    const layout = getVideoLayout(eyeVideo, xrState.stereoSbs);
 
     gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
     gl.bindTexture(gl.TEXTURE_2D, eyeTexture);
@@ -817,6 +832,8 @@ function renderWebXrFrame(time, frame) {
     gl.uniform1f(xrState.halfFovLocation, layout.halfFov);
     gl.uniform2fv(xrState.uvScaleLocation, layout.uvScale);
     gl.uniform2fv(xrState.uvOffsetLocation, layout.uvOffset);
+    gl.uniform1f(xrState.eyeOffsetLocation, eyeOffset);
+    gl.uniform1f(xrState.eyeScaleLocation, eyeScale);
     gl.drawArrays(gl.TRIANGLES, 0, xrState.vertexCount);
   }
 }
@@ -938,11 +955,13 @@ function ensureVrWrap() {
   return vrWrap;
 }
 
-function attachVrStreams(leftStream, rightStream) {
+function attachVrStreams(leftStream, rightStream = null) {
+  vrStereoSbs = !rightStream;
   if (xrSession) {
     vrLeftVideo = createVrVideo(leftStream);
-    vrRightVideo = createVrVideo(rightStream);
-    monitorFPS(vrRightVideo);
+    vrRightVideo = rightStream ? createVrVideo(rightStream) : null;
+    if (xrState) xrState.stereoSbs = vrStereoSbs;
+    monitorFPS(vrLeftVideo);
     statusTxt.textContent = "👓 WebXR-VR verbunden";
     return;
   }
@@ -951,8 +970,25 @@ function attachVrStreams(leftStream, rightStream) {
   vrWrap.style.display = "flex";
   if (vrLeftVideo) vrLeftVideo.srcObject = leftStream;
   if (vrRightVideo) vrRightVideo.srcObject = rightStream;
+  if (vrStereoSbs) {
+    if (vrLeftVideo) {
+      vrLeftVideo.style.width = "100%";
+      vrLeftVideo.style.objectFit = "contain";
+    }
+    if (vrRightVideo) vrRightVideo.style.display = "none";
+  } else {
+    if (vrLeftVideo) {
+      vrLeftVideo.style.width = "50%";
+      vrLeftVideo.style.objectFit = "cover";
+    }
+    if (vrRightVideo) {
+      vrRightVideo.style.display = "";
+      vrRightVideo.style.width = "50%";
+      vrRightVideo.style.objectFit = "cover";
+    }
+  }
   if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
-  if (vrRightVideo) monitorFPS(vrRightVideo);
+  if (vrLeftVideo) monitorFPS(vrLeftVideo);
 }
 
 // Verbindung zu WebRTC-Server aufbauen
@@ -963,7 +999,7 @@ async function start({ vr = false } = {}) {
   resetStreams();
   try {
     pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-    const recvCount = vr ? 2 : 1;
+    const recvCount = 1;
     for (let i = 0; i < recvCount; i++) {
       pc.addTransceiver("video", { direction: "recvonly" });
     }
@@ -978,8 +1014,8 @@ async function start({ vr = false } = {}) {
         return;
       }
       vrStreams.push(stream);
-      if (vrStreams.length >= 2) {
-        attachVrStreams(vrStreams[0], vrStreams[1]);
+      if (vrStreams.length >= 1) {
+        attachVrStreams(vrStreams[0]);
       }
     };
 

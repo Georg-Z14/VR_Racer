@@ -316,3 +316,57 @@ class SharedMemoryCameraStream(VideoStreamTrack):
             self._shm.close()
         except Exception:
             pass
+
+
+class StereoSharedMemoryCameraStream(VideoStreamTrack):
+    def __init__(
+        self,
+        left_shm_name: str,
+        right_shm_name: str,
+        target_size=(1280, 720),
+        left_lock: Optional[mp.Lock] = None,
+        right_lock: Optional[mp.Lock] = None,
+        frame_format: str = "rgb24",
+    ):
+        super().__init__()
+        width, height = target_size
+        self._width = width
+        self._left_shm = SharedMemory(name=left_shm_name)
+        self._right_shm = SharedMemory(name=right_shm_name)
+        self._left_lock = left_lock
+        self._right_lock = right_lock
+        self._frame_format = frame_format
+        self._left_shared_frame = np.ndarray((height, width, 3), dtype=np.uint8, buffer=self._left_shm.buf)
+        self._right_shared_frame = np.ndarray((height, width, 3), dtype=np.uint8, buffer=self._right_shm.buf)
+        self._left_frame = np.zeros((height, width, 3), dtype=np.uint8)
+        self._right_frame = np.zeros((height, width, 3), dtype=np.uint8)
+        self._stereo_frame = np.zeros((height, width * 2, 3), dtype=np.uint8)
+
+    async def recv(self):
+        pts, time_base = await self.next_timestamp()
+        if self._left_lock:
+            with self._left_lock:
+                np.copyto(self._left_frame, self._left_shared_frame)
+        else:
+            np.copyto(self._left_frame, self._left_shared_frame)
+
+        if self._right_lock:
+            with self._right_lock:
+                np.copyto(self._right_frame, self._right_shared_frame)
+        else:
+            np.copyto(self._right_frame, self._right_shared_frame)
+
+        self._stereo_frame[:, :self._width] = self._left_frame
+        self._stereo_frame[:, self._width:] = self._right_frame
+        frm = VideoFrame.from_ndarray(self._stereo_frame, format=self._frame_format)
+        frm.pts = pts
+        frm.time_base = time_base
+        return frm
+
+    def stop(self):
+        super().stop()
+        for shm in (self._left_shm, self._right_shm):
+            try:
+                shm.close()
+            except Exception:
+                pass
