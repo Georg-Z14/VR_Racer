@@ -773,20 +773,11 @@ function createWebXrRenderer(session) {
     uniform vec2 u_uvOffset;
     uniform float u_eyeOffset;
     uniform float u_eyeScale;
-    uniform float u_videoReady;
     varying vec2 v_texCoord;
 
     void main() {
       vec2 uv = u_uvOffset + v_texCoord * u_uvScale;
       uv.x = u_eyeOffset + uv.x * u_eyeScale;
-      if (u_videoReady < 0.5) {
-        float gridX = step(0.48, abs(fract(v_texCoord.x * 12.0) - 0.5));
-        float gridY = step(0.48, abs(fract(v_texCoord.y * 8.0) - 0.5));
-        float grid = max(gridX, gridY);
-        vec3 base = mix(vec3(0.04, 0.20, 0.42), vec3(0.02, 0.55, 0.34), v_texCoord.x);
-        gl_FragColor = vec4(mix(base, vec3(1.0), grid * 0.35), 1.0);
-        return;
-      }
       gl_FragColor = texture2D(u_texture, uv);
     }
   `);
@@ -820,7 +811,6 @@ function createWebXrRenderer(session) {
     uvOffsetLocation: gl.getUniformLocation(program, "u_uvOffset"),
     eyeOffsetLocation: gl.getUniformLocation(program, "u_eyeOffset"),
     eyeScaleLocation: gl.getUniformLocation(program, "u_eyeScale"),
-    videoReadyLocation: gl.getUniformLocation(program, "u_videoReady"),
     stereoSbs: false,
     videoReady: false
   };
@@ -840,11 +830,7 @@ async function startWebXrSession() {
     if (xrState.gl.makeXRCompatible) await xrState.gl.makeXRCompatible();
     xrState.baseLayer = new XRWebGLLayer(xrSession, xrState.gl);
     xrSession.updateRenderState({ baseLayer: xrState.baseLayer });
-    try {
-      xrState.referenceSpace = await xrSession.requestReferenceSpace("local");
-    } catch {
-      xrState.referenceSpace = await xrSession.requestReferenceSpace("viewer");
-    }
+    xrState.referenceSpace = await xrSession.requestReferenceSpace("viewer");
     xrSession.addEventListener("end", handleWebXrSessionEnded);
     xrSession.requestAnimationFrame(renderWebXrFrame);
     statusTxt.textContent = "👓 WebXR-VR aktiv";
@@ -883,7 +869,6 @@ function renderWebXrFrame(time, frame) {
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.disable(gl.CULL_FACE);
   gl.disable(gl.DEPTH_TEST);
-  gl.enable(gl.SCISSOR_TEST);
   gl.useProgram(program);
   gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
   gl.enableVertexAttribArray(xrState.positionLocation);
@@ -903,7 +888,11 @@ function renderWebXrFrame(time, frame) {
     const layout = getVideoLayout(eyeVideo, xrState.stereoSbs);
 
     gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
-    gl.scissor(viewport.x, viewport.y, viewport.width, viewport.height);
+    if (!xrState.videoReady) {
+      gl.clearColor(0.02, 0.02, 0.02, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      continue;
+    }
     gl.bindTexture(gl.TEXTURE_2D, eyeTexture);
     gl.uniformMatrix4fv(xrState.projectionMatrixLocation, false, view.projectionMatrix);
     gl.uniformMatrix4fv(xrState.viewMatrixLocation, false, view.transform.inverse.matrix);
@@ -915,10 +904,8 @@ function renderWebXrFrame(time, frame) {
     gl.uniform2fv(xrState.uvOffsetLocation, layout.uvOffset);
     gl.uniform1f(xrState.eyeOffsetLocation, eyeOffset);
     gl.uniform1f(xrState.eyeScaleLocation, eyeScale);
-    gl.uniform1f(xrState.videoReadyLocation, xrState.videoReady ? 1.0 : 0.0);
     gl.drawArrays(gl.TRIANGLES, 0, xrState.vertexCount);
   }
-  gl.disable(gl.SCISSOR_TEST);
 }
 
 function cleanupWebXrRenderer() {
@@ -1044,7 +1031,7 @@ function ensureVrWrap() {
 
 function attachVrStreams(leftStream, rightStream = null) {
   vrStereoSbs = !rightStream;
-  if (xrSession || vrPreparingWebXr) {
+  if (xrSession) {
     vrLeftVideo = createVrVideo(leftStream);
     vrRightVideo = rightStream ? createVrVideo(rightStream) : null;
     attachHiddenXrVideo(vrLeftVideo);
@@ -1265,10 +1252,12 @@ async function enterVrUi() {
       if (vrWrap.requestFullscreen) vrWrap.requestFullscreen().catch(() => {});
     }
     statusTxt.textContent = "👓 Side-by-Side-VR aktiv";
+    return false;
   } else {
     attachHiddenXrVideo(vrLeftVideo);
     attachHiddenXrVideo(vrRightVideo);
     if (xrState) xrState.stereoSbs = vrStereoSbs;
+    return true;
   }
 }
 
@@ -1314,8 +1303,8 @@ async function toggleView() {
   const targetVr = !vrMode;
   vrMode = targetVr;
   if (targetVr) {
-    await enterVrUi();
-    vrPreparingWebXr = true;
+    const webXrStarted = await enterVrUi();
+    vrPreparingWebXr = webXrStarted;
     await switchStreamMode(true);
     await waitForVrVideoReady();
     vrPreparingWebXr = false;
