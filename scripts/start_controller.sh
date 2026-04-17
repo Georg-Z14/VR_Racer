@@ -17,4 +17,4 @@ if [[ -f ".env" ]]; then
   set +a
 fi
 
-exec venv/bin/python Steuerung_VR_Racer/Steuerung_OHNE_Shutdown.py
+exec venv/bin/python Steuerung_VR_Racer/Steuerung_stable.py
