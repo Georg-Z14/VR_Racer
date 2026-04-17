@@ -33,7 +33,8 @@ const XR_STEREO_CROP = Math.min(0.08, Math.max(0.0, readSignedXrNumberParam("xrS
 const XR_CONVERGENCE = Math.min(0.08, Math.max(-0.08, readSignedXrNumberParam("xrConvergence", 0.0)));
 const XR_VERTICAL_ALIGN = Math.min(0.06, Math.max(-0.06, readSignedXrNumberParam("xrVerticalAlign", 0.0)));
 const XR_SWAP_EYES = readXrBoolParam("xrSwapEyes", true);
-const XR_MONO = readXrBoolParam("xrMono", true);
+const XR_STEREO_ENABLED = readXrBoolParam("xrStereo", false);
+const XR_MONO = !XR_STEREO_ENABLED;
 let vrEyeAspect = DEFAULT_VR_EYE_ASPECT;
 
 // HUD-Werte (werden später im Stream angezeigt)
@@ -1279,8 +1280,21 @@ function attachVrStreams(leftStream, rightStream = null) {
   if (vrLeftVideo) monitorFPS(vrLeftVideo);
 }
 
+function attachXrMonoStream(stream) {
+  vrStereoSbs = false;
+  vrLeftVideo = createVrVideo(stream);
+  vrRightVideo = createVrVideo(stream);
+  attachHiddenXrVideo(vrLeftVideo);
+  attachHiddenXrVideo(vrRightVideo);
+  if (xrState) xrState.stereoSbs = false;
+  monitorFPS(vrLeftVideo);
+  vrLeftVideo.play().catch(() => {});
+  vrRightVideo.play().catch(() => {});
+  statusTxt.textContent = "👓 WebXR-Mono verbunden";
+}
+
 // Verbindung zu WebRTC-Server aufbauen
-async function start({ vr = false } = {}) {
+async function start({ vr = false, xrMonoStream = false } = {}) {
   if (connecting) return false;
   connecting = true;
   statusTxt.textContent = "🔄 Verbinde...";
@@ -1294,6 +1308,12 @@ async function start({ vr = false } = {}) {
 
     pc.ontrack = (event) => {
       const stream = new MediaStream([event.track]);
+      if (xrMonoStream) {
+        vrStreams.push(stream);
+        attachXrMonoStream(stream);
+        return;
+      }
+
       if (!vr) {
         currentStream = stream;
         video.srcObject = currentStream;
@@ -1510,6 +1530,12 @@ async function switchStreamMode(vr) {
   return await start({ vr });
 }
 
+async function switchXrMonoStreamMode() {
+  if (connecting) return false;
+  await stopConnection();
+  return await start({ vr: false, xrMonoStream: true });
+}
+
 // Schaltet zwischen normaler und VR-Ansicht
 async function toggleView() {
   if (connecting) return;
@@ -1518,7 +1544,9 @@ async function toggleView() {
   if (targetVr) {
     const webXrStarted = await enterVrUi();
     vrPreparingWebXr = webXrStarted;
-    const streamStarted = await switchStreamMode(true);
+    const streamStarted = XR_MONO
+      ? await switchXrMonoStreamMode()
+      : await switchStreamMode(true);
     if (webXrStarted && streamStarted) {
       await waitForVrVideoReady();
       startWebXrRenderLoop();
