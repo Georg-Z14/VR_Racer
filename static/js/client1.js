@@ -15,6 +15,7 @@ let vrLeftVideo = null;
 let vrRightVideo = null;
 let xrSession = null;         // Echte WebXR-Session für Apple Vision Pro
 let xrState = null;           // WebGL/WebXR-Renderer-State
+const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
 
 // HUD-Werte (werden später im Stream angezeigt)
 let hudTimer = "⏰ --:--";     // Zeigt verbleibende Login-Zeit
@@ -536,25 +537,44 @@ function updateVideoTexture(gl, texture, videoEl) {
   }
 }
 
-function getCoverUv(videoEl, viewport) {
+function getVideoLayout(videoEl, viewport) {
   if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight || !viewport.width || !viewport.height) {
-    return { scale: [1, 1], offset: [0, 0] };
+    return { positionScale: [1, 1], uvScale: [1, 1], uvOffset: [0, 0] };
   }
 
   const videoAspect = videoEl.videoWidth / videoEl.videoHeight;
   const viewportAspect = viewport.width / viewport.height;
-  let scaleX = 1;
-  let scaleY = 1;
+
+  if (XR_VIDEO_FIT_MODE === "cover") {
+    let uvScaleX = 1;
+    let uvScaleY = 1;
+
+    if (videoAspect > viewportAspect) {
+      uvScaleX = viewportAspect / videoAspect;
+    } else {
+      uvScaleY = videoAspect / viewportAspect;
+    }
+
+    return {
+      positionScale: [1, 1],
+      uvScale: [uvScaleX, uvScaleY],
+      uvOffset: [(1 - uvScaleX) / 2, (1 - uvScaleY) / 2]
+    };
+  }
+
+  let positionScaleX = 1;
+  let positionScaleY = 1;
 
   if (videoAspect > viewportAspect) {
-    scaleX = viewportAspect / videoAspect;
+    positionScaleY = viewportAspect / videoAspect;
   } else {
-    scaleY = videoAspect / viewportAspect;
+    positionScaleX = videoAspect / viewportAspect;
   }
 
   return {
-    scale: [scaleX, scaleY],
-    offset: [(1 - scaleX) / 2, (1 - scaleY) / 2]
+    positionScale: [positionScaleX, positionScaleY],
+    uvScale: [1, 1],
+    uvOffset: [0, 0]
   };
 }
 
@@ -594,14 +614,15 @@ function createWebXrRenderer(session) {
   const program = createProgram(gl, `
     attribute vec2 a_position;
     attribute vec2 a_texCoord;
+    uniform vec2 u_positionScale;
     varying vec2 v_texCoord;
 
     void main() {
-      gl_Position = vec4(a_position, 0.0, 1.0);
+      gl_Position = vec4(a_position * u_positionScale, 0.0, 1.0);
       v_texCoord = a_texCoord;
     }
   `, `
-    precision mediump float;
+    precision highp float;
     uniform sampler2D u_texture;
     uniform vec2 u_uvScale;
     uniform vec2 u_uvOffset;
@@ -636,6 +657,7 @@ function createWebXrRenderer(session) {
     rightTexture: createVideoTexture(gl),
     positionLocation: gl.getAttribLocation(program, "a_position"),
     texCoordLocation: gl.getAttribLocation(program, "a_texCoord"),
+    positionScaleLocation: gl.getUniformLocation(program, "u_positionScale"),
     textureLocation: gl.getUniformLocation(program, "u_texture"),
     uvScaleLocation: gl.getUniformLocation(program, "u_uvScale"),
     uvOffsetLocation: gl.getUniformLocation(program, "u_uvOffset")
@@ -704,12 +726,13 @@ function renderWebXrFrame(time, frame) {
     const isLeftEye = view.eye !== "right";
     const eyeVideo = isLeftEye ? vrLeftVideo : vrRightVideo;
     const eyeTexture = isLeftEye ? xrState.leftTexture : xrState.rightTexture;
-    const uv = getCoverUv(eyeVideo, viewport);
+    const layout = getVideoLayout(eyeVideo, viewport);
 
     gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
     gl.bindTexture(gl.TEXTURE_2D, eyeTexture);
-    gl.uniform2fv(xrState.uvScaleLocation, uv.scale);
-    gl.uniform2fv(xrState.uvOffsetLocation, uv.offset);
+    gl.uniform2fv(xrState.positionScaleLocation, layout.positionScale);
+    gl.uniform2fv(xrState.uvScaleLocation, layout.uvScale);
+    gl.uniform2fv(xrState.uvOffsetLocation, layout.uvOffset);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 }
