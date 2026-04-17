@@ -18,6 +18,8 @@ let xrSession = null;         // Echte WebXR-Session für Apple Vision Pro
 let xrState = null;           // WebGL/WebXR-Renderer-State
 let xrVideoHost = null;       // Unsichtbarer Host fuer Safari/visionOS Video-Decoding
 let vrPreparingWebXr = false; // VR-Stream wird aufgebaut, bevor WebXR startet
+let xrRenderLoopStarted = false;
+let xrTextureErrorLogged = false;
 const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
 const XR_RENDER_MODE = new URLSearchParams(window.location.search).get("xrMode") || "curved";
 const XR_DISTANCE_OVERRIDE = readXrNumberParam("xrDistance", null);
@@ -616,11 +618,17 @@ function updateVideoTexture(gl, texture, videoEl) {
   }
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
   try {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoEl);
     return true;
-  } catch {
+  } catch (error) {
     // Safari kann während des Stream-Wechsels kurzzeitig Frames ablehnen.
+    if (!xrTextureErrorLogged) {
+      console.warn("WebXR-Video konnte noch nicht als Textur geladen werden:", error);
+      xrTextureErrorLogged = true;
+    }
     return false;
   }
 }
@@ -665,6 +673,8 @@ function createVrVideo(stream) {
   videoEl.setAttribute("playsinline", "");
   videoEl.setAttribute("webkit-playsinline", "");
   videoEl.muted = true;
+  videoEl.defaultMuted = true;
+  videoEl.disablePictureInPicture = true;
   videoEl.srcObject = stream;
   videoEl.addEventListener("loadedmetadata", () => videoEl.play().catch(() => {}));
   videoEl.addEventListener("canplay", () => videoEl.play().catch(() => {}));
@@ -715,14 +725,14 @@ function ensureXrVideoHost() {
   xrVideoHost.id = "webxr-video-host";
   Object.assign(xrVideoHost.style, {
     position: "fixed",
-    left: "-20px",
+    left: "0",
     top: "0",
-    width: "4px",
-    height: "4px",
+    width: "320px",
+    height: "180px",
     overflow: "hidden",
-    opacity: "1",
+    opacity: "0.01",
     pointerEvents: "none",
-    zIndex: "9998"
+    zIndex: "0"
   });
   document.body.appendChild(xrVideoHost);
   return xrVideoHost;
@@ -732,8 +742,9 @@ function attachHiddenXrVideo(videoEl) {
   if (!videoEl) return;
   const host = ensureXrVideoHost();
   Object.assign(videoEl.style, {
-    width: "4px",
-    height: "4px",
+    width: "320px",
+    height: "180px",
+    objectFit: "contain",
     opacity: "1",
     pointerEvents: "none"
   });
@@ -759,7 +770,7 @@ async function waitForVrVideoReady(timeoutMs = 10000) {
   return false;
 }
 
-function createWebXrRenderer(session) {
+async function createWebXrRenderer(session) {
   const canvas = document.createElement("canvas");
   canvas.id = "webxr-vr-canvas";
   Object.assign(canvas.style, {
@@ -779,6 +790,10 @@ function createWebXrRenderer(session) {
     xrCompatible: true
   });
   if (!gl) throw new Error("WebGL wird auf diesem Gerät nicht unterstützt");
+
+  if (gl.makeXRCompatible) {
+    await gl.makeXRCompatible();
+  }
 
   const program = createProgram(gl, `
     attribute vec2 a_position;
@@ -879,13 +894,15 @@ async function startWebXrSession() {
     xrSession = await navigator.xr.requestSession("immersive-vr", {
       optionalFeatures: ["local-floor", "hand-tracking"]
     });
-    xrState = createWebXrRenderer(xrSession);
-    if (xrState.gl.makeXRCompatible) await xrState.gl.makeXRCompatible();
+    xrState = await createWebXrRenderer(xrSession);
     xrState.baseLayer = new XRWebGLLayer(xrSession, xrState.gl);
     xrSession.updateRenderState({ baseLayer: xrState.baseLayer });
-    xrState.referenceSpace = await xrSession.requestReferenceSpace("viewer");
+    try {
+      xrState.referenceSpace = await xrSession.requestReferenceSpace("local");
+    } catch {
+      xrState.referenceSpace = await xrSession.requestReferenceSpace("viewer");
+    }
     xrSession.addEventListener("end", handleWebXrSessionEnded);
-    xrSession.requestAnimationFrame(renderWebXrFrame);
     statusTxt.textContent = "👓 WebXR-VR aktiv";
     return true;
   } catch (error) {
@@ -903,6 +920,13 @@ async function startWebXrSession() {
     showFeedback("WebXR konnte nicht gestartet werden. Side-by-Side wird genutzt.", "error");
     return false;
   }
+}
+
+function startWebXrRenderLoop() {
+  if (!xrSession || !xrState || xrRenderLoopStarted) return;
+  xrRenderLoopStarted = true;
+  xrTextureErrorLogged = false;
+  xrSession.requestAnimationFrame(renderWebXrFrame);
 }
 
 function renderWebXrFrame(time, frame) {
@@ -979,6 +1003,8 @@ function cleanupWebXrRenderer() {
   }
   xrSession = null;
   xrState = null;
+  xrRenderLoopStarted = false;
+  xrTextureErrorLogged = false;
 }
 
 async function endWebXrSession() {
@@ -1084,6 +1110,8 @@ function attachVrStreams(leftStream, rightStream = null) {
     attachHiddenXrVideo(vrRightVideo);
     if (xrState) xrState.stereoSbs = vrStereoSbs;
     monitorFPS(vrLeftVideo);
+    vrLeftVideo.play().catch(() => {});
+    vrRightVideo?.play().catch(() => {});
     statusTxt.textContent = "👓 WebXR-VR verbunden";
     return;
   }
@@ -1345,8 +1373,11 @@ async function toggleView() {
   if (targetVr) {
     const webXrStarted = await enterVrUi();
     vrPreparingWebXr = webXrStarted;
-    await switchStreamMode(true);
-    await waitForVrVideoReady();
+    const streamStarted = await switchStreamMode(true);
+    if (webXrStarted && streamStarted) {
+      await waitForVrVideoReady();
+      startWebXrRenderLoop();
+    }
     vrPreparingWebXr = false;
   } else {
     vrPreparingWebXr = false;
