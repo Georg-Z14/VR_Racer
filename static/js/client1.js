@@ -26,8 +26,9 @@ const XR_DISTANCE_OVERRIDE = readXrNumberParam("xrDistance", null);
 const XR_WIDTH_OVERRIDE = readXrNumberParam("xrWidth", null);
 const XR_FOV_OVERRIDE = readXrNumberParam("xrFov", null);
 const XR_VIDEO_TIMEOUT_MS = 7000;
-const XR_SCREEN_SCALE = Math.min(0.95, Math.max(0.45, readXrNumberParam("xrScale", 0.78)));
-const DEFAULT_VR_EYE_ASPECT = 4 / 3;
+const XR_SCREEN_SCALE = Math.min(0.9, Math.max(0.2, readXrNumberParam("xrScale", 0.42)));
+const DEFAULT_VR_EYE_ASPECT = 16 / 9;
+const XR_STEREO_EYE_ASPECT = readXrNumberParam("xrEyeAspect", DEFAULT_VR_EYE_ASPECT);
 let vrEyeAspect = DEFAULT_VR_EYE_ASPECT;
 
 // HUD-Werte (werden später im Stream angezeigt)
@@ -60,7 +61,7 @@ function getAdaptiveXrPlane(videoEl, stereoSbs = false) {
   const sourceAspect = hasVideoSize
     ? videoEl.videoWidth / videoEl.videoHeight
     : (stereoSbs ? DEFAULT_VR_EYE_ASPECT * 2 : 16 / 9);
-  const videoAspect = stereoSbs ? sourceAspect / 2 : sourceAspect;
+  const videoAspect = stereoSbs ? XR_STEREO_EYE_ASPECT : sourceAspect;
   const viewportAspect = window.innerWidth && window.innerHeight
     ? window.innerWidth / window.innerHeight
     : videoAspect;
@@ -637,8 +638,6 @@ function updateVideoTexture(gl, texture, videoEl) {
 
 function getVideoLayout(videoEl, stereoSbs = false) {
   const plane = getAdaptiveXrPlane(videoEl, stereoSbs);
-  const videoWidth = stereoSbs && videoEl?.videoWidth ? videoEl.videoWidth / 2 : videoEl?.videoWidth;
-  const videoHeight = videoEl?.videoHeight;
   if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) {
     return {
       distance: plane.distance,
@@ -648,7 +647,7 @@ function getVideoLayout(videoEl, stereoSbs = false) {
     };
   }
 
-  const videoAspect = videoWidth && videoHeight ? videoWidth / videoHeight : 16 / 9;
+  const videoAspect = getEyeVideoAspect(videoEl, stereoSbs);
   const eyeHeight = plane.width / videoAspect;
 
   if (XR_VIDEO_FIT_MODE === "cover") {
@@ -669,6 +668,10 @@ function getVideoLayout(videoEl, stereoSbs = false) {
 }
 
 function getEyeVideoAspect(videoEl, stereoSbs = false) {
+  if (stereoSbs && XR_STEREO_EYE_ASPECT) {
+    return XR_STEREO_EYE_ASPECT;
+  }
+
   if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) {
     return stereoSbs ? DEFAULT_VR_EYE_ASPECT : 16 / 9;
   }
@@ -712,6 +715,10 @@ function createVrVideo(stream) {
 }
 
 function getVrEyeAspect(videoEl = vrLeftVideo, stereoSbs = vrStereoSbs) {
+  if (stereoSbs && XR_STEREO_EYE_ASPECT) {
+    return XR_STEREO_EYE_ASPECT;
+  }
+
   if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) {
     return DEFAULT_VR_EYE_ASPECT;
   }
