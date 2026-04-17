@@ -42,6 +42,31 @@ def _parse_bool(raw: str, default: bool = True) -> bool:
     return raw.lower() not in ("0", "false", "no", "off")
 
 
+def _select_client_profile(client_profile: Optional[Dict], vr_mode: bool) -> Dict:
+    if not isinstance(client_profile, dict):
+        return {"mode": "vr" if vr_mode else "normal", "recommended_fps": CAMERA_MAX_FPS or 30}
+
+    viewport_width = int(client_profile.get("viewportWidth") or 0)
+    viewport_height = int(client_profile.get("viewportHeight") or 0)
+    dpr = float(client_profile.get("devicePixelRatio") or 1)
+    pixels = viewport_width * viewport_height * min(max(dpr, 1.0), 3.0)
+
+    if vr_mode:
+        recommended_fps = 30 if pixels >= 2_000_000 else 45
+        recommended_size = "1920x1080" if CAMERA_SIZE[0] >= 1920 else f"{CAMERA_SIZE[0]}x{CAMERA_SIZE[1]}"
+    else:
+        recommended_fps = 30 if pixels >= 1_500_000 else 45
+        recommended_size = f"{CAMERA_SIZE[0]}x{CAMERA_SIZE[1]}"
+
+    return {
+        "mode": "vr" if vr_mode else "normal",
+        "viewport": f"{viewport_width}x{viewport_height}",
+        "dpr": round(dpr, 2),
+        "recommended_size": recommended_size,
+        "recommended_fps": recommended_fps,
+    }
+
+
 CAMERA_SIZE = _parse_size(os.getenv("CAMERA_SIZE", "1280x720"))
 CAMERA_MAX_FPS = os.getenv("CAMERA_MAX_FPS")
 CAMERA_MAX_FPS = float(CAMERA_MAX_FPS) if CAMERA_MAX_FPS else None
@@ -436,6 +461,8 @@ async def offer(request: web.Request) -> web.Response:
     try:
         params = await request.json()
         vr_mode = bool(params.get("vr", False))
+        client_profile = _select_client_profile(params.get("clientProfile"), vr_mode)
+        print(f"📐 Client-Profil: {client_profile}")
         if "sdp" not in params or "type" not in params:
             return web.Response(status=400, text="Missing SDP offer")
         offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])

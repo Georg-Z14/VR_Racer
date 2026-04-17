@@ -16,8 +16,8 @@ let vrRightVideo = null;
 let xrSession = null;         // Echte WebXR-Session für Apple Vision Pro
 let xrState = null;           // WebGL/WebXR-Renderer-State
 const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
-const XR_VIDEO_DISTANCE = readXrNumberParam("xrDistance", 3.2);
-const XR_VIDEO_WIDTH = readXrNumberParam("xrWidth", 2.6);
+const XR_DISTANCE_OVERRIDE = readXrNumberParam("xrDistance", null);
+const XR_WIDTH_OVERRIDE = readXrNumberParam("xrWidth", null);
 
 // HUD-Werte (werden später im Stream angezeigt)
 let hudTimer = "⏰ --:--";     // Zeigt verbleibende Login-Zeit
@@ -27,6 +27,38 @@ let hudFps  = "🎥 -- FPS";     // Frames pro Sekunde
 function readXrNumberParam(name, fallback) {
   const value = Number(new URLSearchParams(window.location.search).get(name));
   return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function getClientProfile(vr) {
+  return {
+    vr,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    screenWidth: window.screen?.width || 0,
+    screenHeight: window.screen?.height || 0,
+    devicePixelRatio: window.devicePixelRatio || 1,
+    hardwareConcurrency: navigator.hardwareConcurrency || 0,
+    userAgent: navigator.userAgent,
+    xrDistance: XR_DISTANCE_OVERRIDE,
+    xrWidth: XR_WIDTH_OVERRIDE
+  };
+}
+
+function getAdaptiveXrPlane(videoEl) {
+  const videoAspect = videoEl?.videoWidth && videoEl?.videoHeight
+    ? videoEl.videoWidth / videoEl.videoHeight
+    : 16 / 9;
+  const viewportAspect = window.innerWidth && window.innerHeight
+    ? window.innerWidth / window.innerHeight
+    : videoAspect;
+  const baseDistance = XR_DISTANCE_OVERRIDE || Math.max(3.2, Math.min(5.0, 2.8 + (window.devicePixelRatio || 1) * 0.35));
+  const baseWidth = XR_WIDTH_OVERRIDE || Math.max(1.8, Math.min(3.0, baseDistance * 0.72));
+  const width = viewportAspect < 1 ? baseWidth * 0.85 : baseWidth;
+  return {
+    distance: baseDistance,
+    width,
+    height: width / videoAspect
+  };
 }
 
 /* =====================================================
@@ -545,26 +577,28 @@ function updateVideoTexture(gl, texture, videoEl) {
 }
 
 function getVideoLayout(videoEl) {
+  const plane = getAdaptiveXrPlane(videoEl);
   if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) {
     return {
-      planeScale: [XR_VIDEO_WIDTH / 2, (XR_VIDEO_WIDTH / (16 / 9)) / 2],
+      distance: plane.distance,
+      planeScale: [plane.width / 2, plane.height / 2],
       uvScale: [1, 1],
       uvOffset: [0, 0]
     };
   }
 
-  const videoAspect = videoEl.videoWidth / videoEl.videoHeight;
-
   if (XR_VIDEO_FIT_MODE === "cover") {
     return {
-      planeScale: [XR_VIDEO_WIDTH / 2, (XR_VIDEO_WIDTH / videoAspect) / 2],
+      distance: plane.distance,
+      planeScale: [plane.width / 2, plane.height / 2],
       uvScale: [1, 1],
       uvOffset: [0, 0]
     };
   }
 
   return {
-    planeScale: [XR_VIDEO_WIDTH / 2, (XR_VIDEO_WIDTH / videoAspect) / 2],
+    distance: plane.distance,
+    planeScale: [plane.width / 2, plane.height / 2],
     uvScale: [1, 1],
     uvOffset: [0, 0]
   };
@@ -736,7 +770,7 @@ function renderWebXrFrame(time, frame) {
     gl.uniformMatrix4fv(xrState.projectionMatrixLocation, false, view.projectionMatrix);
     gl.uniformMatrix4fv(xrState.viewMatrixLocation, false, view.transform.inverse.matrix);
     gl.uniform2fv(xrState.planeScaleLocation, layout.planeScale);
-    gl.uniform1f(xrState.planeDistanceLocation, XR_VIDEO_DISTANCE);
+    gl.uniform1f(xrState.planeDistanceLocation, layout.distance);
     gl.uniform2fv(xrState.uvScaleLocation, layout.uvScale);
     gl.uniform2fv(xrState.uvOffsetLocation, layout.uvOffset);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -910,7 +944,8 @@ async function start({ vr = false } = {}) {
     const offerPayload = {
       sdp: pc.localDescription.sdp,
       type: pc.localDescription.type,
-      vr
+      vr,
+      clientProfile: getClientProfile(vr)
     };
     const res = await fetch("/offer", {
       method: "POST",
