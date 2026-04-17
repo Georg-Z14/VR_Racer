@@ -6,8 +6,6 @@
 import sqlite3
 import hashlib
 import os
-import ssl
-import sys
 import jwt
 import datetime
 import traceback
@@ -23,11 +21,6 @@ from dotenv import load_dotenv
 # ======================================================
 # ⚙️ BASISKONFIGURATION
 # ======================================================
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-
 load_dotenv()
 
 pcs = set()
@@ -562,25 +555,9 @@ def create_app() -> web.Application:
     app.on_shutdown.append(on_shutdown)
     return app
 
-def create_ssl_context() -> Optional[ssl.SSLContext]:
-    cert_file = os.getenv("SSL_CERT_FILE")
-    key_file = os.getenv("SSL_KEY_FILE")
-    if not cert_file or not key_file:
-        return None
-    if not os.path.exists(cert_file):
-        raise FileNotFoundError(f"SSL_CERT_FILE nicht gefunden: {cert_file}")
-    if not os.path.exists(key_file):
-        raise FileNotFoundError(f"SSL_KEY_FILE nicht gefunden: {key_file}")
-
-    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-    context.load_cert_chain(cert_file, key_file)
-    return context
-
 if __name__ == "__main__":
     print("🚀 Starte VR-Racer ")
     configure_multicore()
     port = int(os.getenv("PORT", "8080"))
-    ssl_context = create_ssl_context()
-    protocol = "https" if ssl_context else "http"
-    print(f"🌍 Server erreichbar über {protocol}://0.0.0.0:{port}")
-    web.run_app(create_app(), host="0.0.0.0", port=port, ssl_context=ssl_context)
+    print(f"🌍 Lokaler Server für Cloudflare Tunnel: http://0.0.0.0:{port}")
+    web.run_app(create_app(), host="0.0.0.0", port=port)
