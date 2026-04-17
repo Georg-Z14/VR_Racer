@@ -26,7 +26,7 @@ Systempakete:
 
 ```bash
 sudo apt update
-sudo apt install -y git python3-venv python3-pip python3-picamera2 bluetooth bluez
+sudo apt install -y git python3-venv python3-pip python3-dev python3-picamera2 bluetooth bluez swig
 ```
 
 Projektumgebung:
@@ -85,3 +85,63 @@ sudo usermod -aG input,gpio vrracersbs
 ```
 
 Danach abmelden und neu per SSH einloggen.
+
+Controller einmalig koppeln und vertrauen:
+
+```bash
+bluetoothctl
+power on
+agent on
+default-agent
+scan on
+```
+
+Den PS5-Controller in Pairing-Modus setzen: PS-Taste und Create-Taste halten, bis die LED schnell blinkt. Dann in `bluetoothctl`:
+
+```bash
+pair XX:XX:XX:XX:XX:XX
+trust XX:XX:XX:XX:XX:XX
+connect XX:XX:XX:XX:XX:XX
+scan off
+quit
+```
+
+Wenn `PS5_CONTROLLER_MAC` in `.env` gesetzt ist, nutzt das Steuerungsskript nur diesen Controller.
+
+## Autostart nach Akkuwechsel
+
+Die Services starten nach einem Neustart automatisch:
+
+- `vr-racer-server.service` fuer den WebRTC/App-Server
+- `vr-racer-controller.service` fuer die PS5-Controller-Steuerung
+- `vr-racer-tunnel.service` fuer den Cloudflare Quick Tunnel
+
+Installation auf dem Raspberry Pi:
+
+```bash
+cd ~/VR_Racer
+chmod +x scripts/*.sh
+./scripts/install_autostart.sh
+```
+
+Direkt starten, ohne neu zu booten:
+
+```bash
+sudo systemctl start vr-racer-server.service
+sudo systemctl start vr-racer-controller.service
+sudo systemctl start vr-racer-tunnel.service
+```
+
+Status und Logs pruefen:
+
+```bash
+systemctl status vr-racer-server.service
+systemctl status vr-racer-controller.service
+systemctl status vr-racer-tunnel.service
+
+journalctl -u vr-racer-server.service -f
+journalctl -u vr-racer-controller.service -f
+journalctl -u vr-racer-tunnel.service -f
+```
+
+Hinweis: Der Quick Tunnel erzeugt nach einem Neustart normalerweise eine neue `trycloudflare.com` URL. Fuer eine feste URL braucht ihr spaeter einen benannten Cloudflare Tunnel.
