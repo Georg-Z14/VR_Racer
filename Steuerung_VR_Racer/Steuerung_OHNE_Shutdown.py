@@ -49,8 +49,8 @@ factory = LGPIOFactory()
 servo = Servo(
     SERVO_PIN,
     pin_factory=factory,
-    min_pulse_width=0.0010,
-    max_pulse_width=0.0020,
+    min_pulse_width=0.0008,
+    max_pulse_width=0.0022
 )
 
 IN1 = OutputDevice(MOTOR_IN1, pin_factory=factory)
