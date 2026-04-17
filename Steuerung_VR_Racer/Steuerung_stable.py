@@ -40,6 +40,23 @@ MOTOR_ENA = 12                # PWM Geschwindigkeit
 PWM_FREQUENCY = 1000          # PWM Frequenz für Motor
 CONTROLLER_DEVICE_PATH = os.getenv("CONTROLLER_DEVICE_PATH", "").strip()
 
+PREFERRED_CONTROLLER_NAMES = (
+    "wireless controller",
+    "dualsense",
+    "dualshock",
+    "playstation",
+    "sony",
+    "gamepad",
+    "joystick",
+)
+
+IGNORED_DEVICE_NAMES = (
+    "mouse",
+    "keyboard",
+    "touchpad",
+    "touchscreen",
+)
+
 
 # =========================
 # GPIO INITIALISIERUNG
@@ -157,9 +174,66 @@ def emergency_stop():
 # CONTROLLER ERKENNUNG
 # =========================
 
+def capability_codes(capabilities, event_type):
+    """
+    Liefert nur die numerischen evdev-Codes.
+    EV_ABS kann je nach evdev-Version als (code, AbsInfo) geliefert werden.
+    """
+    codes = set()
+
+    for item in capabilities.get(event_type, []):
+        if isinstance(item, tuple):
+            codes.add(item[0])
+        else:
+            codes.add(item)
+
+    return codes
+
+
+def is_controller_device(dev, capabilities):
+    """
+    Erlaubt nur Geräte, die zur erwarteten PS5/Gamepad-Belegung passen.
+    Mäuse können ebenfalls EV_ABS melden und dürfen nicht als Controller gelten.
+    """
+    name = dev.name.lower()
+    abs_codes = capability_codes(capabilities, ecodes.EV_ABS)
+    key_codes = capability_codes(capabilities, ecodes.EV_KEY)
+
+    gamepad_buttons = {
+        getattr(ecodes, code_name)
+        for code_name in (
+            "BTN_GAMEPAD",
+            "BTN_SOUTH",
+            "BTN_EAST",
+            "BTN_NORTH",
+            "BTN_WEST",
+            "BTN_TL",
+            "BTN_TR",
+            "BTN_TL2",
+            "BTN_TR2",
+            "BTN_SELECT",
+            "BTN_START",
+            "BTN_MODE",
+        )
+        if hasattr(ecodes, code_name)
+    }
+
+    has_controller_name = any(keyword in name for keyword in PREFERRED_CONTROLLER_NAMES)
+    has_ignored_name = any(keyword in name for keyword in IGNORED_DEVICE_NAMES)
+    has_gamepad_button = bool(key_codes & gamepad_buttons)
+
+    has_steering_axis = ecodes.ABS_X in abs_codes
+    has_trigger_axis = ecodes.ABS_Z in abs_codes or ecodes.ABS_RZ in abs_codes
+
+    if has_ignored_name and not has_gamepad_button:
+        return False
+
+    return has_steering_axis and has_trigger_axis and (has_gamepad_button or has_controller_name)
+
+
 def find_controller():
     """
-    Sucht generisch nach Eingabegeräten mit Analogachsen.
+    Sucht nach einem Gamepad/PS5-Controller mit passenden Analogachsen.
     Gibt:
     - direkt Gerät zurück (wenn nur eins gefunden)
     - automatische Auswahl (wenn mehrere vorhanden)
@@ -178,8 +252,8 @@ def find_controller():
             dev = InputDevice(path)
             capabilities = dev.capabilities()
 
-            # Geräte mit Analog-Eingaben (z. B. Controller)
-            if ecodes.EV_ABS in capabilities:
+            # Nur echte Gamepad-Kandidaten akzeptieren.
+            if is_controller_device(dev, capabilities):
                 devices.append(dev)
 
         except Exception:
