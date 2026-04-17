@@ -19,7 +19,7 @@ let xrState = null;           // WebGL/WebXR-Renderer-State
 let xrVideoHost = null;       // Unsichtbarer Host fuer Safari/visionOS Video-Decoding
 let vrPreparingWebXr = false; // VR-Stream wird aufgebaut, bevor WebXR startet
 const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
-const XR_RENDER_MODE = new URLSearchParams(window.location.search).get("xrMode") || "curved";
+const XR_RENDER_MODE = new URLSearchParams(window.location.search).get("xrMode") || "screen";
 const XR_DISTANCE_OVERRIDE = readXrNumberParam("xrDistance", null);
 const XR_WIDTH_OVERRIDE = readXrNumberParam("xrWidth", null);
 const XR_FOV_OVERRIDE = readXrNumberParam("xrFov", null);
@@ -751,6 +751,13 @@ function createWebXrRenderer(session) {
     varying vec2 v_texCoord;
 
     void main() {
+      if (u_curvedMode < -0.5) {
+        float aspectScale = min(0.96, (u_planeScale.y / max(u_planeScale.x, 0.001)) * 0.96);
+        gl_Position = vec4(a_position.x * 0.96, a_position.y * aspectScale, 0.0, 1.0);
+        v_texCoord = a_texCoord;
+        return;
+      }
+
       vec4 worldPosition;
       if (u_curvedMode > 0.5) {
         float theta = a_position.x * u_halfFov;
@@ -898,7 +905,10 @@ function renderWebXrFrame(time, frame) {
     gl.uniformMatrix4fv(xrState.viewMatrixLocation, false, view.transform.inverse.matrix);
     gl.uniform2fv(xrState.planeScaleLocation, layout.planeScale);
     gl.uniform1f(xrState.planeDistanceLocation, layout.distance);
-    gl.uniform1f(xrState.curvedModeLocation, XR_RENDER_MODE === "plane" ? 0 : 1);
+    gl.uniform1f(
+      xrState.curvedModeLocation,
+      XR_RENDER_MODE === "screen" ? -1 : (XR_RENDER_MODE === "plane" ? 0 : 1)
+    );
     gl.uniform1f(xrState.halfFovLocation, layout.halfFov);
     gl.uniform2fv(xrState.uvScaleLocation, layout.uvScale);
     gl.uniform2fv(xrState.uvOffsetLocation, layout.uvOffset);
