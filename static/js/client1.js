@@ -16,8 +16,10 @@ let vrRightVideo = null;
 let xrSession = null;         // Echte WebXR-Session für Apple Vision Pro
 let xrState = null;           // WebGL/WebXR-Renderer-State
 const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
+const XR_RENDER_MODE = new URLSearchParams(window.location.search).get("xrMode") || "curved";
 const XR_DISTANCE_OVERRIDE = readXrNumberParam("xrDistance", null);
 const XR_WIDTH_OVERRIDE = readXrNumberParam("xrWidth", null);
+const XR_FOV_OVERRIDE = readXrNumberParam("xrFov", null);
 
 // HUD-Werte (werden später im Stream angezeigt)
 let hudTimer = "⏰ --:--";     // Zeigt verbleibende Login-Zeit
@@ -51,11 +53,15 @@ function getAdaptiveXrPlane(videoEl) {
   const viewportAspect = window.innerWidth && window.innerHeight
     ? window.innerWidth / window.innerHeight
     : videoAspect;
-  const baseDistance = XR_DISTANCE_OVERRIDE || Math.max(3.2, Math.min(5.0, 2.8 + (window.devicePixelRatio || 1) * 0.35));
-  const baseWidth = XR_WIDTH_OVERRIDE || Math.max(1.8, Math.min(3.0, baseDistance * 0.72));
+  const curvedMode = XR_RENDER_MODE !== "plane";
+  const baseDistance = XR_DISTANCE_OVERRIDE || (curvedMode ? 2.4 : Math.max(3.2, Math.min(5.0, 2.8 + (window.devicePixelRatio || 1) * 0.35)));
+  const horizontalFovDeg = XR_FOV_OVERRIDE || (curvedMode ? 92 : 44);
+  const fovWidth = 2 * baseDistance * Math.tan((horizontalFovDeg * Math.PI / 180) / 2);
+  const baseWidth = XR_WIDTH_OVERRIDE || (curvedMode ? fovWidth : Math.max(1.8, Math.min(3.0, baseDistance * 0.72)));
   const width = viewportAspect < 1 ? baseWidth * 0.85 : baseWidth;
   return {
     distance: baseDistance,
+    halfFov: (horizontalFovDeg * Math.PI / 180) / 2,
     width,
     height: width / videoAspect
   };
@@ -565,6 +571,32 @@ function createVideoTexture(gl) {
   return texture;
 }
 
+function createXrMesh(horizontalSegments = 64, verticalSegments = 8) {
+  const data = [];
+
+  function pushVertex(xIndex, yIndex) {
+    const x = (xIndex / horizontalSegments) * 2 - 1;
+    const y = (yIndex / verticalSegments) * 2 - 1;
+    const u = xIndex / horizontalSegments;
+    const v = yIndex / verticalSegments;
+    data.push(x, y, u, v);
+  }
+
+  for (let y = 0; y < verticalSegments; y++) {
+    for (let x = 0; x < horizontalSegments; x++) {
+      pushVertex(x, y);
+      pushVertex(x + 1, y);
+      pushVertex(x, y + 1);
+
+      pushVertex(x, y + 1);
+      pushVertex(x + 1, y);
+      pushVertex(x + 1, y + 1);
+    }
+  }
+
+  return new Float32Array(data);
+}
+
 function updateVideoTexture(gl, texture, videoEl) {
   if (!videoEl || videoEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
   gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -644,15 +676,28 @@ function createWebXrRenderer(session) {
     uniform mat4 u_viewMatrix;
     uniform vec2 u_planeScale;
     uniform float u_planeDistance;
+    uniform float u_curvedMode;
+    uniform float u_halfFov;
     varying vec2 v_texCoord;
 
     void main() {
-      vec4 worldPosition = vec4(
-        a_position.x * u_planeScale.x,
-        a_position.y * u_planeScale.y,
-        -u_planeDistance,
-        1.0
-      );
+      vec4 worldPosition;
+      if (u_curvedMode > 0.5) {
+        float theta = a_position.x * u_halfFov;
+        worldPosition = vec4(
+          sin(theta) * u_planeDistance,
+          a_position.y * u_planeScale.y,
+          -cos(theta) * u_planeDistance,
+          1.0
+        );
+      } else {
+        worldPosition = vec4(
+          a_position.x * u_planeScale.x,
+          a_position.y * u_planeScale.y,
+          -u_planeDistance,
+          1.0
+        );
+      }
       gl_Position = u_projectionMatrix * u_viewMatrix * worldPosition;
       v_texCoord = a_texCoord;
     }
@@ -670,15 +715,9 @@ function createWebXrRenderer(session) {
   `);
 
   const vertexBuffer = gl.createBuffer();
+  const mesh = createXrMesh();
   gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-    -1, -1, 0, 0,
-     1, -1, 1, 0,
-    -1,  1, 0, 1,
-    -1,  1, 0, 1,
-     1, -1, 1, 0,
-     1,  1, 1, 1
-  ]), gl.STATIC_DRAW);
+  gl.bufferData(gl.ARRAY_BUFFER, mesh, gl.STATIC_DRAW);
 
   return {
     session,
@@ -686,6 +725,7 @@ function createWebXrRenderer(session) {
     gl,
     program,
     vertexBuffer,
+    vertexCount: mesh.length / 4,
     baseLayer: null,
     referenceSpace: null,
     leftTexture: createVideoTexture(gl),
@@ -696,6 +736,8 @@ function createWebXrRenderer(session) {
     viewMatrixLocation: gl.getUniformLocation(program, "u_viewMatrix"),
     planeScaleLocation: gl.getUniformLocation(program, "u_planeScale"),
     planeDistanceLocation: gl.getUniformLocation(program, "u_planeDistance"),
+    curvedModeLocation: gl.getUniformLocation(program, "u_curvedMode"),
+    halfFovLocation: gl.getUniformLocation(program, "u_halfFov"),
     textureLocation: gl.getUniformLocation(program, "u_texture"),
     uvScaleLocation: gl.getUniformLocation(program, "u_uvScale"),
     uvOffsetLocation: gl.getUniformLocation(program, "u_uvOffset")
@@ -771,9 +813,11 @@ function renderWebXrFrame(time, frame) {
     gl.uniformMatrix4fv(xrState.viewMatrixLocation, false, view.transform.inverse.matrix);
     gl.uniform2fv(xrState.planeScaleLocation, layout.planeScale);
     gl.uniform1f(xrState.planeDistanceLocation, layout.distance);
+    gl.uniform1f(xrState.curvedModeLocation, XR_RENDER_MODE === "plane" ? 0 : 1);
+    gl.uniform1f(xrState.halfFovLocation, layout.halfFov);
     gl.uniform2fv(xrState.uvScaleLocation, layout.uvScale);
     gl.uniform2fv(xrState.uvOffsetLocation, layout.uvOffset);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.drawArrays(gl.TRIANGLES, 0, xrState.vertexCount);
   }
 }
 
