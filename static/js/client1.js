@@ -32,6 +32,7 @@ const XR_SCREEN_SCALE = Math.min(0.9, Math.max(0.2, readXrNumberParam("xrScale",
 const XR_FRAMEBUFFER_SCALE = Math.min(1.8, Math.max(1.0, readXrNumberParam("xrFramebufferScale", 1.25)));
 const XR_PLANE_HEIGHT = Math.min(2.2, Math.max(0.0, readSignedXrNumberParam("xrPlaneHeight", 1.6)));
 const XR_CINEMA_SCALE = Math.min(1.6, Math.max(0.8, readXrNumberParam("xrCinemaScale", 1.2)));
+const XR_CINEMA_Y_OFFSET = Math.min(0.5, Math.max(-0.5, readSignedXrNumberParam("xrCinemaYOffset", 0.08)));
 const DEFAULT_VR_EYE_ASPECT = 16 / 9;
 const XR_STEREO_EYE_ASPECT = readXrNumberParam("xrEyeAspect", DEFAULT_VR_EYE_ASPECT);
 const XR_STEREO_CROP = Math.min(0.08, Math.max(0.0, readSignedXrNumberParam("xrStereoCrop", 0.0)));
@@ -1063,6 +1064,9 @@ async function createWebXrRenderer(session) {
     material: leftMaterial,
     videoTexture: null,
     placeholderTexture,
+    cinemaOrigin: new THREE.Vector3(),
+    cinemaDirection: new THREE.Vector3(),
+    cinemaUp: new THREE.Vector3(),
     onResize,
     stereoSbs: false,
     videoReady: false,
@@ -1171,7 +1175,9 @@ function updateWebXrPlaneLayout() {
   const height = width / Math.max(aspect || DEFAULT_VR_EYE_ASPECT, 0.0001);
 
   for (const mesh of getXrMeshes()) {
-    mesh.position.set(0, XR_PLANE_HEIGHT, -layout.distance);
+    if (stereoSbs) {
+      mesh.position.set(0, XR_PLANE_HEIGHT, -layout.distance);
+    }
     mesh.scale.set(width, height, 1);
   }
 
@@ -1187,9 +1193,29 @@ function updateWebXrPlaneLayout() {
   }
 }
 
+function updateCinemaScreenPose() {
+  if (!xrState || xrState.stereoSbs) return;
+
+  const xrCamera = xrState.renderer.xr.getCamera(xrState.camera);
+  const layout = getAdaptiveXrPlane(vrLeftVideo || video, false);
+  xrCamera.updateMatrixWorld(true);
+  xrCamera.getWorldPosition(xrState.cinemaOrigin);
+  xrState.cinemaDirection.set(0, 0, -1).applyQuaternion(xrCamera.quaternion);
+  xrState.cinemaUp.set(0, 1, 0).applyQuaternion(xrCamera.quaternion);
+
+  for (const mesh of getXrMeshes()) {
+    mesh.position
+      .copy(xrState.cinemaOrigin)
+      .addScaledVector(xrState.cinemaDirection, layout.distance)
+      .addScaledVector(xrState.cinemaUp, XR_CINEMA_Y_OFFSET);
+    mesh.quaternion.copy(xrCamera.quaternion);
+  }
+}
+
 function renderWebXrFrame() {
   if (!xrSession || !xrState) return;
   syncXrEyeLayers();
+  updateCinemaScreenPose();
 
   const videoEl = vrLeftVideo;
   const hasVideoFrame = Boolean(
