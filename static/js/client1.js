@@ -30,6 +30,7 @@ const XR_FOV_OVERRIDE = readXrNumberParam("xrFov", null);
 const XR_VIDEO_TIMEOUT_MS = 7000;
 const XR_SCREEN_SCALE = Math.min(0.9, Math.max(0.2, readXrNumberParam("xrScale", 0.42)));
 const XR_FRAMEBUFFER_SCALE = Math.min(1.8, Math.max(1.0, readXrNumberParam("xrFramebufferScale", 1.25)));
+const XR_PLANE_HEIGHT = Math.min(2.2, Math.max(0.0, readSignedXrNumberParam("xrPlaneHeight", 1.6)));
 const DEFAULT_VR_EYE_ASPECT = 16 / 9;
 const XR_STEREO_EYE_ASPECT = readXrNumberParam("xrEyeAspect", DEFAULT_VR_EYE_ASPECT);
 const XR_STEREO_CROP = Math.min(0.08, Math.max(0.0, readSignedXrNumberParam("xrStereoCrop", 0.035)));
@@ -1148,7 +1149,7 @@ function updateWebXrPlaneLayout() {
   const width = layout.width;
   const height = width / Math.max(aspect || DEFAULT_VR_EYE_ASPECT, 0.0001);
 
-  xrState.mesh.position.set(0, 0, -layout.distance);
+  xrState.mesh.position.set(0, XR_PLANE_HEIGHT, -layout.distance);
   xrState.mesh.scale.set(width, height, 1);
   xrState.material.uniforms.eyeAspect.value = aspect || DEFAULT_VR_EYE_ASPECT;
   xrState.material.uniforms.planeAspect.value = width / Math.max(height, 0.0001);
@@ -1194,10 +1195,12 @@ function renderWebXrFrame() {
 }
 
 async function handleWebXrSessionStarted() {
+  vrMode = true;
   if (xrState?.material) {
     xrState.material.uniforms.isVR.value = true;
   }
   await toggleSecondCamera(true);
+  window.dispatchEvent(new CustomEvent("sessionstart", { detail: { xrSession } }));
 }
 
 function cleanupWebXrRenderer() {
@@ -1294,10 +1297,14 @@ async function endWebXrSession() {
 
 function handleWebXrSessionEnded() {
   const shouldReturnToNormal = vrMode;
+  vrMode = false;
   void toggleSecondCamera(false);
+  if (xrState?.material) {
+    xrState.material.uniforms.isVR.value = false;
+  }
+  window.dispatchEvent(new CustomEvent("sessionend", { detail: { xrSession } }));
   cleanupWebXrRenderer();
   if (shouldReturnToNormal) {
-    vrMode = false;
     returnToNormalAfterXrEnd();
   }
 }
