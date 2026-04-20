@@ -250,33 +250,10 @@ video {
   font-weight: 700;
   cursor: pointer;
 }
-#vision-pro-btn {
-  position: absolute;
-  left: 50%;
-  bottom: 18px;
-  transform: translateX(-50%);
-  z-index: 15;
-  padding: 10px 16px;
-  border: 2px solid var(--primary);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.72);
-  color: #fff;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 0 18px rgba(0,224,255,0.45);
-}
-#vision-pro-btn:hover {
-  box-shadow: 0 0 24px rgba(255,0,122,0.55);
-}
 #player-wrap:fullscreen #fullscreen-exit-btn,
 #player-wrap:-webkit-full-screen #fullscreen-exit-btn,
 body.fullscreen-active #fullscreen-exit-btn {
   display: block;
-}
-#player-wrap:fullscreen #vision-pro-btn,
-#player-wrap:-webkit-full-screen #vision-pro-btn,
-body.fullscreen-active #vision-pro-btn {
-  display: none;
 }
 #player-wrap iframe {
   width: 100%;

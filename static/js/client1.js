@@ -29,6 +29,7 @@ const XR_WIDTH_OVERRIDE = readXrNumberParam("xrWidth", null);
 const XR_FOV_OVERRIDE = readXrNumberParam("xrFov", null);
 const XR_VIDEO_TIMEOUT_MS = 7000;
 const XR_SCREEN_SCALE = Math.min(0.9, Math.max(0.2, readXrNumberParam("xrScale", 0.42)));
+const XR_FRAMEBUFFER_SCALE = Math.min(1.8, Math.max(1.0, readXrNumberParam("xrFramebufferScale", 1.25)));
 const DEFAULT_VR_EYE_ASPECT = 16 / 9;
 const XR_STEREO_EYE_ASPECT = readXrNumberParam("xrEyeAspect", DEFAULT_VR_EYE_ASPECT);
 const XR_STEREO_CROP = Math.min(0.08, Math.max(0.0, readSignedXrNumberParam("xrStereoCrop", 0.035)));
@@ -87,7 +88,7 @@ function getAdaptiveXrPlane(videoEl, stereoSbs = false) {
     : videoAspect;
   const curvedMode = XR_RENDER_MODE !== "plane";
   const baseDistance = XR_DISTANCE_OVERRIDE || (curvedMode ? 2.8 : Math.max(3.2, Math.min(5.0, 2.8 + (window.devicePixelRatio || 1) * 0.35)));
-  const horizontalFovDeg = XR_FOV_OVERRIDE || (curvedMode ? 72 : 44);
+  const horizontalFovDeg = XR_FOV_OVERRIDE || (curvedMode ? 60 : 44);
   const fovWidth = 2 * baseDistance * Math.tan((horizontalFovDeg * Math.PI / 180) / 2);
   const baseWidth = XR_WIDTH_OVERRIDE || (curvedMode ? fovWidth : Math.max(1.8, Math.min(3.0, baseDistance * 0.72)));
   const width = viewportAspect < 1 ? baseWidth * 0.85 : baseWidth;
@@ -983,8 +984,14 @@ async function createWebXrRenderer(session) {
     alpha: false
   });
   renderer.xr.enabled = true;
+  if (renderer.xr.setReferenceSpaceType) {
+    renderer.xr.setReferenceSpaceType("local");
+  }
+  if (renderer.xr.setFramebufferScaleFactor) {
+    renderer.xr.setFramebufferScaleFactor(XR_FRAMEBUFFER_SCALE);
+  }
   renderer.setClearColor(0x000000, 1);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
   renderer.setSize(window.innerWidth, window.innerHeight, false);
 
   const scene = new THREE.Scene();
