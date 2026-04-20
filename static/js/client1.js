@@ -31,6 +31,7 @@ const XR_VIDEO_TIMEOUT_MS = 7000;
 const XR_SCREEN_SCALE = Math.min(0.9, Math.max(0.2, readXrNumberParam("xrScale", 0.42)));
 const XR_FRAMEBUFFER_SCALE = Math.min(1.8, Math.max(1.0, readXrNumberParam("xrFramebufferScale", 1.25)));
 const XR_PLANE_HEIGHT = Math.min(2.2, Math.max(0.0, readSignedXrNumberParam("xrPlaneHeight", 1.6)));
+const XR_CINEMA_SCALE = Math.min(1.6, Math.max(0.8, readXrNumberParam("xrCinemaScale", 1.2)));
 const DEFAULT_VR_EYE_ASPECT = 16 / 9;
 const XR_STEREO_EYE_ASPECT = readXrNumberParam("xrEyeAspect", DEFAULT_VR_EYE_ASPECT);
 const XR_STEREO_CROP = Math.min(0.08, Math.max(0.0, readSignedXrNumberParam("xrStereoCrop", 0.0)));
@@ -1154,7 +1155,7 @@ function setWebXrVideoElement(videoEl, stereoSbs = true) {
   xrState.stereoSbs = stereoSbs;
   for (const material of getXrMaterials()) {
     material.uniforms.map.value = texture;
-    material.uniforms.isVR.value = true;
+    material.uniforms.isVR.value = Boolean(stereoSbs);
   }
   updateWebXrPlaneLayout();
 }
@@ -1166,7 +1167,7 @@ function updateWebXrPlaneLayout() {
   const stereoSbs = xrState.stereoSbs;
   const layout = getAdaptiveXrPlane(videoEl, stereoSbs);
   const aspect = getEyeVideoAspect(videoEl, stereoSbs);
-  const width = layout.width;
+  const width = layout.width * (stereoSbs ? 1 : XR_CINEMA_SCALE);
   const height = width / Math.max(aspect || DEFAULT_VR_EYE_ASPECT, 0.0001);
 
   for (const mesh of getXrMeshes()) {
@@ -1225,9 +1226,9 @@ function renderWebXrFrame() {
 async function handleWebXrSessionStarted() {
   vrMode = true;
   for (const material of getXrMaterials()) {
-    material.uniforms.isVR.value = true;
+    material.uniforms.isVR.value = Boolean(xrState?.stereoSbs);
   }
-  await toggleSecondCamera(true);
+  await toggleSecondCamera(Boolean(xrState?.stereoSbs));
   window.dispatchEvent(new CustomEvent("sessionstart", { detail: { xrSession } }));
 }
 
@@ -1456,7 +1457,7 @@ function attachXrMonoStream(stream) {
   monitorFPS(vrLeftVideo);
   vrLeftVideo.play().catch(() => {});
   vrRightVideo.play().catch(() => {});
-  statusTxt.textContent = "👓 WebXR-Mono verbunden";
+  statusTxt.textContent = "🖥 Kino-Ansicht verbunden";
 }
 
 // Verbindung zu WebRTC-Server aufbauen
@@ -1537,7 +1538,7 @@ function createOverlay() {
   overlay.className = "control-overlay";
   overlay.innerHTML = `
     <button class="overlay-btn" title="Neu verbinden" onclick="restartStream()">🔄</button>
-    <button class="overlay-btn" title="Vollbild" onclick="enterVisionProMode()">⛶</button>
+    <button class="overlay-btn" title="Kinoansicht" onclick="enterVisionProMode()">⛶</button>
     ${isAdmin ? `<button class="overlay-btn" title="Benutzerverwaltung" onclick="openAdminPanel()">🛠️</button>` : ""}
     <button class="overlay-btn" title="Abmelden" onclick="logoutUser()">🚪</button>
   `;
@@ -1619,7 +1620,7 @@ function monitorFPS(videoEl) {
    ✅ VR-VOLLANSICHT (WebXR mit Side-by-Side-Fallback)
 ===================================================== */
 
-async function enterVrUi() {
+async function enterVrUi({ stereoFallback = true, statusLabel = "👓 Starte WebXR-VR..." } = {}) {
   const body = document.body;
   const header = document.querySelector("header");
   const loginCard = document.getElementById("login-card");
@@ -1637,10 +1638,15 @@ async function enterVrUi() {
   if (hudEl) hudEl.style.display = "none";
 
   body.classList.add("vr-active");
-  statusTxt.textContent = "👓 Starte WebXR-VR...";
+  statusTxt.textContent = statusLabel;
 
   const webXrStarted = await startWebXrSession();
   if (!webXrStarted) {
+    if (!stereoFallback) {
+      restoreNormalUi();
+      requestCleanFullscreen();
+      return false;
+    }
     if (vrStreams.length > 0) {
       attachVrStreams(vrStreams[0], vrStreams[1] || null);
     } else {
@@ -1728,7 +1734,7 @@ async function toggleView() {
    🔧 HILFSFUNKTIONEN
 ===================================================== */
 
-// Sauberen Mono-Vollbildmodus aktivieren. Kein WebXR, keine zweite Kamera.
+// Mono-Kinoansicht fuer die Brille: WebXR-Raum, aber ohne Stereo/SBS.
 async function enterVisionProMode() {
   if (connecting) return;
 
@@ -1737,12 +1743,32 @@ async function enterVisionProMode() {
     vrPreparingWebXr = false;
     await exitVrUi();
     await switchStreamMode(false);
-  } else {
-    await toggleSecondCamera(false);
+    return;
   }
 
-  requestCleanFullscreen();
-  if (statusTxt) statusTxt.textContent = "🖥 Vollbild aktiv";
+  vrMode = true;
+  vrPreparingWebXr = true;
+  await toggleSecondCamera(false);
+
+  const webXrStarted = await enterVrUi({
+    stereoFallback: false,
+    statusLabel: "🖥 Starte Kino-Ansicht..."
+  });
+
+  if (webXrStarted) {
+    const streamStarted = await switchXrMonoStreamMode();
+    if (streamStarted) {
+      await waitForVrVideoReady();
+      startWebXrRenderLoop();
+    } else {
+      await exitVrUi();
+      await switchStreamMode(false);
+    }
+  } else {
+    vrMode = false;
+  }
+
+  vrPreparingWebXr = false;
 }
 
 function requestCleanFullscreen() {
