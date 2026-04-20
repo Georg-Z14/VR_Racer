@@ -42,6 +42,14 @@ def _parse_bool(raw: str, default: bool = True) -> bool:
     return raw.lower() not in ("0", "false", "no", "off")
 
 
+def _parse_int(raw: str, default: int) -> int:
+    try:
+        value = int(raw)
+        return value if value > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
 def _select_client_profile(client_profile: Optional[Dict], vr_mode: bool) -> Dict:
     if not isinstance(client_profile, dict):
         return {"mode": "vr" if vr_mode else "normal", "recommended_fps": CAMERA_MAX_FPS or 30}
@@ -80,6 +88,45 @@ CAMERA_COLOR_CONVERT = os.getenv("CAMERA_COLOR_CONVERT", "auto")
 CAMERA_TEST_PATTERN = _parse_bool(os.getenv("CAMERA_TEST_PATTERN", "0"), False)
 CAMERA_RIGHT_INDEX = int(os.getenv("CAMERA_RIGHT_INDEX", "0"))
 CAMERA_LEFT_INDEX = int(os.getenv("CAMERA_LEFT_INDEX", "1"))
+WEBRTC_VIDEO_BITRATE_KBPS = _parse_int(os.getenv("WEBRTC_VIDEO_BITRATE_KBPS"), 2500)
+WEBRTC_VR_VIDEO_BITRATE_KBPS = _parse_int(os.getenv("WEBRTC_VR_VIDEO_BITRATE_KBPS"), 7000)
+
+
+def _apply_video_bitrate(sdp: str, bitrate_kbps: int) -> str:
+    if not bitrate_kbps:
+        return sdp
+
+    lines = sdp.splitlines()
+    output = []
+    in_video = False
+    inserted = False
+
+    def insert_bitrate_lines():
+        nonlocal inserted
+        if not inserted:
+            output.append(f"b=AS:{bitrate_kbps}")
+            output.append(f"b=TIAS:{bitrate_kbps * 1000}")
+            inserted = True
+
+    for line in lines:
+        if line.startswith("m="):
+            if in_video:
+                insert_bitrate_lines()
+            in_video = line.startswith("m=video")
+            inserted = False
+
+        if in_video and (line.startswith("b=AS:") or line.startswith("b=TIAS:")):
+            continue
+
+        output.append(line)
+
+        if in_video and line.startswith("c="):
+            insert_bitrate_lines()
+
+    if in_video:
+        insert_bitrate_lines()
+
+    return "\r\n".join(output) + "\r\n"
 
 
 class CameraManager:
@@ -521,7 +568,13 @@ async def offer(request: web.Request) -> web.Response:
         for track in camera_manager.get_tracks(vr_mode):
             pc.addTrack(track)
         answer = await pc.createAnswer()
+        target_bitrate = WEBRTC_VR_VIDEO_BITRATE_KBPS if vr_mode else WEBRTC_VIDEO_BITRATE_KBPS
+        answer = RTCSessionDescription(
+            sdp=_apply_video_bitrate(answer.sdp, target_bitrate),
+            type=answer.type,
+        )
         await pc.setLocalDescription(answer)
+        print(f"🎚️ WebRTC Video-Bitrate: {target_bitrate} kbit/s ({'vr' if vr_mode else 'normal'})")
         return web.json_response({
             "sdp": pc.localDescription.sdp,
             "type": pc.localDescription.type
