@@ -75,7 +75,7 @@ def _select_client_profile(client_profile: Optional[Dict], vr_mode: bool) -> Dic
     }
 
 
-CAMERA_SIZE = _parse_size(os.getenv("CAMERA_SIZE", "1280x720"))
+CAMERA_SIZE = _parse_size(os.getenv("CAMERA_SIZE", "640x480"), (640, 480))
 CAMERA_MAX_FPS = os.getenv("CAMERA_MAX_FPS")
 CAMERA_MAX_FPS = float(CAMERA_MAX_FPS) if CAMERA_MAX_FPS else None
 CAMERA_USE_ALL_CORES = _parse_bool(os.getenv("CAMERA_USE_ALL_CORES", "1"), True)
@@ -88,8 +88,9 @@ CAMERA_COLOR_CONVERT = os.getenv("CAMERA_COLOR_CONVERT", "auto")
 CAMERA_TEST_PATTERN = _parse_bool(os.getenv("CAMERA_TEST_PATTERN", "0"), False)
 CAMERA_RIGHT_INDEX = int(os.getenv("CAMERA_RIGHT_INDEX", "0"))
 CAMERA_LEFT_INDEX = int(os.getenv("CAMERA_LEFT_INDEX", "1"))
-WEBRTC_VIDEO_BITRATE_KBPS = _parse_int(os.getenv("WEBRTC_VIDEO_BITRATE_KBPS"), 2500)
-WEBRTC_VR_VIDEO_BITRATE_KBPS = _parse_int(os.getenv("WEBRTC_VR_VIDEO_BITRATE_KBPS"), 7000)
+ENABLE_STEREO_CAMERA = _parse_bool(os.getenv("ENABLE_STEREO_CAMERA", "0"), False)
+WEBRTC_VIDEO_BITRATE_KBPS = _parse_int(os.getenv("WEBRTC_VIDEO_BITRATE_KBPS"), 2000)
+WEBRTC_VR_VIDEO_BITRATE_KBPS = _parse_int(os.getenv("WEBRTC_VR_VIDEO_BITRATE_KBPS"), 3000)
 
 
 def _apply_video_bitrate(sdp: str, bitrate_kbps: int) -> str:
@@ -144,7 +145,8 @@ class CameraManager:
             f"swap_rb={int(CAMERA_SWAP_RB)} buffers={CAMERA_BUFFER_COUNT} "
             f"queue={int(CAMERA_QUEUE)} max_fps={CAMERA_MAX_FPS} "
             f"convert={CAMERA_COLOR_CONVERT} test={int(CAMERA_TEST_PATTERN)} "
-            f"right_idx={CAMERA_RIGHT_INDEX} left_idx={CAMERA_LEFT_INDEX}"
+            f"right_idx={CAMERA_RIGHT_INDEX} left_idx={CAMERA_LEFT_INDEX} "
+            f"stereo={int(ENABLE_STEREO_CAMERA)}"
         )
         self.camera_right_proc = CameraProcess(
             camera_index=CAMERA_RIGHT_INDEX,
@@ -189,16 +191,24 @@ class CameraManager:
                 self.camera_left_proc = None
                 self.camera_left_track = None
 
-    def set_second_camera(self, enabled: bool):
+    def set_second_camera(self, enabled: bool) -> bool:
         with self._lock:
+            if not ENABLE_STEREO_CAMERA:
+                self._manual_second_camera_enabled = False
+                self._stop_left_camera_if_idle_locked()
+                return False
+
             self._manual_second_camera_enabled = enabled
             if enabled:
                 self._ensure_left_camera_locked()
             else:
                 self._stop_left_camera_if_idle_locked()
+            return self.camera_left_proc is not None
 
     def acquire_vr(self):
         with self._lock:
+            if not ENABLE_STEREO_CAMERA:
+                return
             self._ensure_left_camera_locked()
             self._vr_clients += 1
 
@@ -209,7 +219,7 @@ class CameraManager:
             self._stop_left_camera_if_idle_locked()
 
     def get_tracks(self, vr_mode: bool):
-        if not vr_mode:
+        if not vr_mode or not ENABLE_STEREO_CAMERA:
             return [self._relay.subscribe(self.camera_right_track)]
         if self.camera_left_proc is None:
             raise RuntimeError("Kamera links ist nicht verfügbar")
@@ -530,8 +540,8 @@ async def camera_second(request: web.Request) -> web.Response:
     try:
         data = await request.json()
         enabled = bool(data.get("enabled", False))
-        camera_manager.set_second_camera(enabled)
-        return web.json_response({"enabled": enabled})
+        actual_enabled = camera_manager.set_second_camera(enabled)
+        return web.json_response({"enabled": actual_enabled})
     except Exception:
         print("💥 [/camera/second] Fehler:\n" + traceback.format_exc())
         return web.Response(status=500, text="Camera switch error")

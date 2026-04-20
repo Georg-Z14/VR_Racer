@@ -39,9 +39,10 @@ const XR_STEREO_CROP = Math.min(0.08, Math.max(0.0, readSignedXrNumberParam("xrS
 const XR_CONVERGENCE = Math.min(0.08, Math.max(-0.08, readSignedXrNumberParam("xrConvergence", 0.0)));
 const XR_VERTICAL_ALIGN = Math.min(0.06, Math.max(-0.06, readSignedXrNumberParam("xrVerticalAlign", 0.0)));
 const XR_SWAP_EYES = readXrBoolParam("xrSwapEyes", false);
-const XR_STEREO_ENABLED = readXrBoolParam("xrStereo", true);
+const XR_STEREO_ENABLED = readXrBoolParam("xrStereo", false);
 const XR_MONO = !XR_STEREO_ENABLED;
 const THREE_MODULE_URL = "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js";
+const WEBRTC_VIDEO_CODEC = (new URLSearchParams(window.location.search).get("codec") || "h264").toLowerCase();
 let vrEyeAspect = DEFAULT_VR_EYE_ASPECT;
 
 // HUD-Werte (werden später im Stream angezeigt)
@@ -63,6 +64,28 @@ function readXrBoolParam(name, fallback) {
 function readSignedXrNumberParam(name, fallback) {
   const value = Number(new URLSearchParams(window.location.search).get(name));
   return Number.isFinite(value) ? value : fallback;
+}
+
+function preferVideoCodec(transceiver) {
+  if (
+    !transceiver?.setCodecPreferences ||
+    typeof RTCRtpReceiver === "undefined" ||
+    !RTCRtpReceiver.getCapabilities
+  ) return;
+  const capabilities = RTCRtpReceiver.getCapabilities("video");
+  if (!capabilities?.codecs?.length) return;
+
+  const codecName = WEBRTC_VIDEO_CODEC.replace(/^video\//, "");
+  const preferredMime = `video/${codecName}`.toLowerCase();
+  const preferred = capabilities.codecs.filter(codec =>
+    codec.mimeType.toLowerCase() === preferredMime
+  );
+  if (!preferred.length) return;
+
+  const rest = capabilities.codecs.filter(codec =>
+    codec.mimeType.toLowerCase() !== preferredMime
+  );
+  transceiver.setCodecPreferences([...preferred, ...rest]);
 }
 
 function getClientProfile(vr) {
@@ -1254,7 +1277,7 @@ async function handleWebXrSessionStarted() {
   for (const material of getXrMaterials()) {
     material.uniforms.isVR.value = Boolean(xrState?.stereoSbs);
   }
-  await toggleSecondCamera(Boolean(xrState?.stereoSbs));
+  await toggleSecondCamera(Boolean(XR_STEREO_ENABLED && xrState?.stereoSbs));
   window.dispatchEvent(new CustomEvent("sessionstart", { detail: { xrSession } }));
 }
 
@@ -1496,7 +1519,8 @@ async function start({ vr = false, xrMonoStream = false } = {}) {
     pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
     const recvCount = 1;
     for (let i = 0; i < recvCount; i++) {
-      pc.addTransceiver("video", { direction: "recvonly" });
+      const transceiver = pc.addTransceiver("video", { direction: "recvonly" });
+      preferVideoCodec(transceiver);
     }
 
     pc.ontrack = (event) => {
@@ -1739,11 +1763,12 @@ async function toggleView() {
   const targetVr = !vrMode;
   vrMode = targetVr;
   if (targetVr) {
-    const webXrStarted = await enterVrUi();
+    const webXrStarted = await enterVrUi({
+      stereoFallback: false,
+      statusLabel: "🖥 Starte Kino-Ansicht..."
+    });
     vrPreparingWebXr = webXrStarted;
-    const streamStarted = XR_MONO
-      ? await switchXrMonoStreamMode()
-      : await switchStreamMode(true);
+    const streamStarted = await switchXrMonoStreamMode();
     if (webXrStarted && streamStarted) {
       await waitForVrVideoReady();
       startWebXrRenderLoop();
