@@ -598,7 +598,11 @@ function createStereoVideoShaderMaterial(THREE, texture) {
     eyeIndex: { value: 0.0 },
     videoResolution: { value: new THREE.Vector2(16, 9) },
     eyeAspect: { value: DEFAULT_VR_EYE_ASPECT },
-    planeAspect: { value: DEFAULT_VR_EYE_ASPECT }
+    planeAspect: { value: DEFAULT_VR_EYE_ASPECT },
+    stereoCrop: { value: XR_STEREO_CROP },
+    convergence: { value: XR_CONVERGENCE },
+    verticalAlign: { value: XR_VERTICAL_ALIGN },
+    swapEyes: { value: XR_SWAP_EYES ? 1.0 : 0.0 }
   };
 
   return new THREE.ShaderMaterial({
@@ -623,6 +627,10 @@ function createStereoVideoShaderMaterial(THREE, texture) {
       uniform vec2 videoResolution;
       uniform float eyeAspect;
       uniform float planeAspect;
+      uniform float stereoCrop;
+      uniform float convergence;
+      uniform float verticalAlign;
+      uniform float swapEyes;
       varying vec2 vUv;
 
       vec2 containUv(vec2 uv, float contentAspect, float viewportAspect) {
@@ -647,8 +655,13 @@ function createStereoVideoShaderMaterial(THREE, texture) {
         }
 
         if (isVR) {
-          float sideBySideOffset = eyeIndex < 0.5 ? 0.0 : 0.5;
-          uv.x = uv.x * 0.5 + sideBySideOffset;
+          float sourceEye = mix(eyeIndex, 1.0 - eyeIndex, step(0.5, swapEyes));
+          float sideBySideOffset = sourceEye < 0.5 ? 0.0 : 0.5;
+          float crop = clamp(stereoCrop, 0.0, 0.12);
+          float eyeScale = max(0.2, 0.5 - 2.0 * crop);
+          float convergenceShift = sourceEye < 0.5 ? convergence : -convergence;
+          uv.x = uv.x * eyeScale + sideBySideOffset + crop + convergenceShift;
+          uv.y = clamp(uv.y + (eyeIndex < 0.5 ? verticalAlign : -verticalAlign), 0.0, 1.0);
         }
 
         gl_FragColor = texture2D(map, uv);
