@@ -22,6 +22,9 @@ let xrRenderLoopStarted = false;
 let xrTextureErrorLogged = false;
 let threeModulePromise = null;
 let xrSecondCameraEnabled = false;
+let streamConfig = null;
+let streamConfigPromise = null;
+let mediaMtxSessionUrl = null;
 const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
 const XR_RENDER_MODE = new URLSearchParams(window.location.search).get("xrMode") || "screen";
 const XR_DISTANCE_OVERRIDE = readXrNumberParam("xrDistance", null);
@@ -64,6 +67,119 @@ function readXrBoolParam(name, fallback) {
 function readSignedXrNumberParam(name, fallback) {
   const value = Number(new URLSearchParams(window.location.search).get(name));
   return Number.isFinite(value) ? value : fallback;
+}
+
+function buildDefaultMediaMtxUrl() {
+  const protocol = window.location.protocol === "https:" ? "https:" : "http:";
+  return `${protocol}//${window.location.hostname}:8889/cam`;
+}
+
+async function loadStreamConfig() {
+  if (streamConfig) return streamConfig;
+  if (!streamConfigPromise) {
+    streamConfigPromise = fetch("/stream/config", {
+      headers: token ? { "Authorization": `Bearer ${token}` } : {}
+    })
+      .then(res => res.ok ? res.json() : { backend: "mediamtx" })
+      .catch(() => ({ backend: "mediamtx" }));
+  }
+  streamConfig = await streamConfigPromise;
+  return streamConfig;
+}
+
+function getMediaMtxWebrtcUrl() {
+  return streamConfig?.mediamtxWebrtcUrl || buildDefaultMediaMtxUrl();
+}
+
+function getMediaMtxWhepUrl() {
+  const url = getMediaMtxWebrtcUrl();
+  return url.endsWith("/whep") ? url : `${url.replace(/\/$/, "")}/whep`;
+}
+
+function attachIncomingStream(stream, vr, xrMonoStream) {
+  if (xrMonoStream) {
+    vrStreams.push(stream);
+    attachXrMonoStream(stream);
+    return;
+  }
+
+  if (!vr) {
+    currentStream = stream;
+    video.srcObject = currentStream;
+    video.style.display = "";
+    monitorFPS(video);
+    createOverlay();
+    return;
+  }
+
+  vrStreams.push(stream);
+  if (vrStreams.length >= 1) {
+    attachVrStreams(vrStreams[0]);
+  }
+}
+
+function waitForIceGatheringComplete(peerConnection) {
+  if (peerConnection.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise(resolve => {
+    const timeout = setTimeout(() => {
+      peerConnection.removeEventListener("icegatheringstatechange", checkState);
+      resolve();
+    }, 3000);
+    const checkState = () => {
+      if (peerConnection.iceGatheringState === "complete") {
+        clearTimeout(timeout);
+        peerConnection.removeEventListener("icegatheringstatechange", checkState);
+        resolve();
+      }
+    };
+    peerConnection.addEventListener("icegatheringstatechange", checkState);
+  });
+}
+
+async function closeMediaMtxSession() {
+  if (!mediaMtxSessionUrl) return;
+  const sessionUrl = mediaMtxSessionUrl;
+  mediaMtxSessionUrl = null;
+  try {
+    await fetch(sessionUrl, { method: "DELETE" });
+  } catch {}
+}
+
+async function startMediaMtxStream({ vr = false, xrMonoStream = false } = {}) {
+  pc = new RTCPeerConnection();
+  const transceiver = pc.addTransceiver("video", { direction: "recvonly" });
+  preferVideoCodec(transceiver);
+
+  pc.ontrack = (event) => {
+    const stream = new MediaStream([event.track]);
+    attachIncomingStream(stream, vr, xrMonoStream);
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await waitForIceGatheringComplete(pc);
+
+  const whepUrl = getMediaMtxWhepUrl();
+  const response = await fetch(whepUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/sdp" },
+    body: pc.localDescription.sdp,
+  });
+
+  if (!response.ok) {
+    throw new Error(`MediaMTX WHEP failed: ${response.status}`);
+  }
+
+  const locationHeader = response.headers.get("Location");
+  mediaMtxSessionUrl = locationHeader
+    ? new URL(locationHeader, whepUrl).toString()
+    : null;
+
+  const answerSdp = await response.text();
+  await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+  statusTxt.textContent = vr || xrMonoStream ? "🖥 MediaMTX Kino verbunden" : "✅ MediaMTX verbunden";
+  monitorPing(pc);
+  return true;
 }
 
 function preferVideoCodec(transceiver) {
@@ -1398,6 +1514,7 @@ async function returnToNormalAfterXrEnd() {
 }
 
 async function stopConnection() {
+  await closeMediaMtxSession();
   if (pc) {
     pc.ontrack = null;
     const receivers = pc.getReceivers ? pc.getReceivers() : [];
@@ -1516,63 +1633,10 @@ async function start({ vr = false, xrMonoStream = false } = {}) {
   statusTxt.textContent = "🔄 Verbinde...";
   resetStreams();
   try {
-    pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-    const recvCount = 1;
-    for (let i = 0; i < recvCount; i++) {
-      const transceiver = pc.addTransceiver("video", { direction: "recvonly" });
-      preferVideoCodec(transceiver);
-    }
-
-    pc.ontrack = (event) => {
-      const stream = new MediaStream([event.track]);
-      if (xrMonoStream) {
-        vrStreams.push(stream);
-        attachXrMonoStream(stream);
-        return;
-      }
-
-      if (!vr) {
-        currentStream = stream;
-        video.srcObject = currentStream;
-        monitorFPS(video);
-        createOverlay();
-        return;
-      }
-      vrStreams.push(stream);
-      if (vrStreams.length >= 1) {
-        attachVrStreams(vrStreams[0]);
-      }
-    };
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    const offerPayload = {
-      sdp: pc.localDescription.sdp,
-      type: pc.localDescription.type,
-      vr,
-      clientProfile: getClientProfile(vr)
-    };
-    const res = await fetch("/offer", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
-      },
-      body: JSON.stringify(offerPayload)
-    });
-
-    if (!res.ok) {
-      statusTxt.textContent = "❌ Zugriff verweigert!";
-      await stopConnection();
-      return false;
-    }
-
-    const answer = await res.json();
-    await pc.setRemoteDescription(answer);
-    statusTxt.textContent = vr ? "👓 VR verbunden!" : "✅ Verbunden!";
-    monitorPing(pc);
-    return true;
-  } catch {
+    await loadStreamConfig();
+    return await startMediaMtxStream({ vr, xrMonoStream });
+  } catch (error) {
+    console.warn("MediaMTX stream failed:", error);
     statusTxt.textContent = "⚠️ Stream-Fehler!";
     await stopConnection();
     return false;
