@@ -33,7 +33,7 @@ const XR_FRAMEBUFFER_SCALE = Math.min(1.8, Math.max(1.0, readXrNumberParam("xrFr
 const XR_PLANE_HEIGHT = Math.min(2.2, Math.max(0.0, readSignedXrNumberParam("xrPlaneHeight", 1.6)));
 const DEFAULT_VR_EYE_ASPECT = 16 / 9;
 const XR_STEREO_EYE_ASPECT = readXrNumberParam("xrEyeAspect", DEFAULT_VR_EYE_ASPECT);
-const XR_STEREO_CROP = Math.min(0.08, Math.max(0.0, readSignedXrNumberParam("xrStereoCrop", 0.035)));
+const XR_STEREO_CROP = Math.min(0.08, Math.max(0.0, readSignedXrNumberParam("xrStereoCrop", 0.0)));
 const XR_CONVERGENCE = Math.min(0.08, Math.max(-0.08, readSignedXrNumberParam("xrConvergence", 0.0)));
 const XR_VERTICAL_ALIGN = Math.min(0.06, Math.max(-0.06, readSignedXrNumberParam("xrVerticalAlign", 0.0)));
 const XR_SWAP_EYES = readXrBoolParam("xrSwapEyes", false);
@@ -596,6 +596,7 @@ function createStereoVideoShaderMaterial(THREE, texture) {
     map: { value: texture },
     isVR: { value: false },
     eyeIndex: { value: 0.0 },
+    sourceEye: { value: 0.0 },
     videoResolution: { value: new THREE.Vector2(16, 9) },
     eyeAspect: { value: DEFAULT_VR_EYE_ASPECT },
     planeAspect: { value: DEFAULT_VR_EYE_ASPECT },
@@ -624,6 +625,7 @@ function createStereoVideoShaderMaterial(THREE, texture) {
       uniform sampler2D map;
       uniform bool isVR;
       uniform float eyeIndex;
+      uniform float sourceEye;
       uniform vec2 videoResolution;
       uniform float eyeAspect;
       uniform float planeAspect;
@@ -655,11 +657,11 @@ function createStereoVideoShaderMaterial(THREE, texture) {
         }
 
         if (isVR) {
-          float sourceEye = mix(eyeIndex, 1.0 - eyeIndex, step(0.5, swapEyes));
-          float sideBySideOffset = sourceEye < 0.5 ? 0.0 : 0.5;
+          float mappedSourceEye = mix(sourceEye, 1.0 - sourceEye, step(0.5, swapEyes));
+          float sideBySideOffset = mappedSourceEye < 0.5 ? 0.0 : 0.5;
           float crop = clamp(stereoCrop, 0.0, 0.12);
           float eyeScale = max(0.2, 0.5 - 2.0 * crop);
-          float convergenceShift = sourceEye < 0.5 ? convergence : -convergence;
+          float convergenceShift = mappedSourceEye < 0.5 ? convergence : -convergence;
           uv.x = uv.x * eyeScale + sideBySideOffset + crop + convergenceShift;
           uv.y = clamp(uv.y + (eyeIndex < 0.5 ? verticalAlign : -verticalAlign), 0.0, 1.0);
         }
@@ -1019,42 +1021,22 @@ async function createWebXrRenderer(session) {
   const placeholderTexture = new THREE.DataTexture(placeholderData, 2, 2, THREE.RGBAFormat);
   placeholderTexture.needsUpdate = true;
 
-  const material = createStereoVideoShaderMaterial(THREE, placeholderTexture);
+  const leftMaterial = createStereoVideoShaderMaterial(THREE, placeholderTexture);
+  const rightMaterial = createStereoVideoShaderMaterial(THREE, placeholderTexture);
+  leftMaterial.uniforms.eyeIndex.value = 0.0;
+  leftMaterial.uniforms.sourceEye.value = 0.0;
+  rightMaterial.uniforms.eyeIndex.value = 1.0;
+  rightMaterial.uniforms.sourceEye.value = 1.0;
+
   const geometry = new THREE.PlaneGeometry(1, 1, 1, 1);
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.z = -3;
-  scene.add(mesh);
-
-  const eyeProbe = new THREE.Vector3();
-  const leftProbe = new THREE.Vector3();
-  const rightProbe = new THREE.Vector3();
-
-  mesh.onBeforeRender = (activeRenderer, activeScene, activeCamera) => {
-    material.uniforms.isVR.value = activeRenderer.xr.isPresenting;
-    if (!activeRenderer.xr.isPresenting) {
-      material.uniforms.eyeIndex.value = 0.0;
-      return;
-    }
-
-    const xrCamera = activeRenderer.xr.getCamera(camera);
-    const eyeCameras = xrCamera?.cameras || [];
-    if (eyeCameras.length >= 2) {
-      if (activeCamera === eyeCameras[1]) {
-        material.uniforms.eyeIndex.value = 1.0;
-        return;
-      }
-      if (activeCamera === eyeCameras[0]) {
-        material.uniforms.eyeIndex.value = 0.0;
-        return;
-      }
-
-      activeCamera.getWorldPosition(eyeProbe);
-      eyeCameras[0].getWorldPosition(leftProbe);
-      eyeCameras[1].getWorldPosition(rightProbe);
-      material.uniforms.eyeIndex.value =
-        eyeProbe.distanceToSquared(rightProbe) < eyeProbe.distanceToSquared(leftProbe) ? 1.0 : 0.0;
-    }
-  };
+  const leftMesh = new THREE.Mesh(geometry, leftMaterial);
+  const rightMesh = new THREE.Mesh(geometry, rightMaterial);
+  leftMesh.layers.set(1);
+  rightMesh.layers.set(2);
+  camera.layers.enable(1);
+  camera.layers.enable(2);
+  scene.add(leftMesh);
+  scene.add(rightMesh);
 
   const onResize = () => {
     camera.aspect = window.innerWidth / Math.max(window.innerHeight, 1);
@@ -1073,9 +1055,11 @@ async function createWebXrRenderer(session) {
     renderer,
     scene,
     camera,
-    mesh,
+    meshes: [leftMesh, rightMesh],
+    mesh: leftMesh,
     geometry,
-    material,
+    materials: [leftMaterial, rightMaterial],
+    material: leftMaterial,
     videoTexture: null,
     placeholderTexture,
     onResize,
@@ -1127,10 +1111,31 @@ function startWebXrRenderLoop() {
   xrState.renderer.setAnimationLoop(renderWebXrFrame);
 }
 
+function getXrMaterials() {
+  return xrState?.materials || (xrState?.material ? [xrState.material] : []);
+}
+
+function getXrMeshes() {
+  return xrState?.meshes || (xrState?.mesh ? [xrState.mesh] : []);
+}
+
+function syncXrEyeLayers() {
+  if (!xrState?.renderer || !xrState?.camera) return;
+
+  const xrCamera = xrState.renderer.xr.getCamera(xrState.camera);
+  const eyeCameras = xrCamera?.cameras || [];
+  if (eyeCameras.length < 2) return;
+
+  eyeCameras[0].layers.enable(1);
+  eyeCameras[0].layers.disable(2);
+  eyeCameras[1].layers.enable(2);
+  eyeCameras[1].layers.disable(1);
+}
+
 function setWebXrVideoElement(videoEl, stereoSbs = true) {
   if (!xrState || !videoEl) return;
 
-  const { THREE, material } = xrState;
+  const { THREE } = xrState;
   if (xrState.videoTexture) {
     xrState.videoTexture.dispose();
   }
@@ -1147,8 +1152,10 @@ function setWebXrVideoElement(videoEl, stereoSbs = true) {
 
   xrState.videoTexture = texture;
   xrState.stereoSbs = stereoSbs;
-  material.uniforms.map.value = texture;
-  material.uniforms.isVR.value = true;
+  for (const material of getXrMaterials()) {
+    material.uniforms.map.value = texture;
+    material.uniforms.isVR.value = true;
+  }
   updateWebXrPlaneLayout();
 }
 
@@ -1162,18 +1169,26 @@ function updateWebXrPlaneLayout() {
   const width = layout.width;
   const height = width / Math.max(aspect || DEFAULT_VR_EYE_ASPECT, 0.0001);
 
-  xrState.mesh.position.set(0, XR_PLANE_HEIGHT, -layout.distance);
-  xrState.mesh.scale.set(width, height, 1);
-  xrState.material.uniforms.eyeAspect.value = aspect || DEFAULT_VR_EYE_ASPECT;
-  xrState.material.uniforms.planeAspect.value = width / Math.max(height, 0.0001);
+  for (const mesh of getXrMeshes()) {
+    mesh.position.set(0, XR_PLANE_HEIGHT, -layout.distance);
+    mesh.scale.set(width, height, 1);
+  }
+
+  for (const material of getXrMaterials()) {
+    material.uniforms.eyeAspect.value = aspect || DEFAULT_VR_EYE_ASPECT;
+    material.uniforms.planeAspect.value = width / Math.max(height, 0.0001);
+  }
 
   if (videoEl?.videoWidth && videoEl?.videoHeight) {
-    xrState.material.uniforms.videoResolution.value.set(videoEl.videoWidth, videoEl.videoHeight);
+    for (const material of getXrMaterials()) {
+      material.uniforms.videoResolution.value.set(videoEl.videoWidth, videoEl.videoHeight);
+    }
   }
 }
 
 function renderWebXrFrame() {
   if (!xrSession || !xrState) return;
+  syncXrEyeLayers();
 
   const videoEl = vrLeftVideo;
   const hasVideoFrame = Boolean(
@@ -1209,8 +1224,8 @@ function renderWebXrFrame() {
 
 async function handleWebXrSessionStarted() {
   vrMode = true;
-  if (xrState?.material) {
-    xrState.material.uniforms.isVR.value = true;
+  for (const material of getXrMaterials()) {
+    material.uniforms.isVR.value = true;
   }
   await toggleSecondCamera(true);
   window.dispatchEvent(new CustomEvent("sessionstart", { detail: { xrSession } }));
@@ -1230,7 +1245,9 @@ function cleanupWebXrRenderer() {
     if (xrState.videoTexture) xrState.videoTexture.dispose();
     if (xrState.placeholderTexture) xrState.placeholderTexture.dispose();
     if (xrState.geometry) xrState.geometry.dispose();
-    if (xrState.material) xrState.material.dispose();
+    for (const material of getXrMaterials()) {
+      material.dispose();
+    }
     if (xrState.renderer) xrState.renderer.dispose();
     if (xrState.canvas) xrState.canvas.remove();
   }
@@ -1312,8 +1329,8 @@ function handleWebXrSessionEnded() {
   const shouldReturnToNormal = vrMode;
   vrMode = false;
   void toggleSecondCamera(false);
-  if (xrState?.material) {
-    xrState.material.uniforms.isVR.value = false;
+  for (const material of getXrMaterials()) {
+    material.uniforms.isVR.value = false;
   }
   window.dispatchEvent(new CustomEvent("sessionend", { detail: { xrSession } }));
   cleanupWebXrRenderer();
