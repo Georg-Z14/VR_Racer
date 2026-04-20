@@ -20,6 +20,8 @@ let xrVideoHost = null;       // Unsichtbarer Host fuer Safari/visionOS Video-De
 let vrPreparingWebXr = false; // VR-Stream wird aufgebaut, bevor WebXR startet
 let xrRenderLoopStarted = false;
 let xrTextureErrorLogged = false;
+let threeModulePromise = null;
+let xrSecondCameraEnabled = false;
 const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
 const XR_RENDER_MODE = new URLSearchParams(window.location.search).get("xrMode") || "screen";
 const XR_DISTANCE_OVERRIDE = readXrNumberParam("xrDistance", null);
@@ -32,9 +34,10 @@ const XR_STEREO_EYE_ASPECT = readXrNumberParam("xrEyeAspect", DEFAULT_VR_EYE_ASP
 const XR_STEREO_CROP = Math.min(0.08, Math.max(0.0, readSignedXrNumberParam("xrStereoCrop", 0.035)));
 const XR_CONVERGENCE = Math.min(0.08, Math.max(-0.08, readSignedXrNumberParam("xrConvergence", 0.0)));
 const XR_VERTICAL_ALIGN = Math.min(0.06, Math.max(-0.06, readSignedXrNumberParam("xrVerticalAlign", 0.0)));
-const XR_SWAP_EYES = readXrBoolParam("xrSwapEyes", true);
-const XR_STEREO_ENABLED = readXrBoolParam("xrStereo", false);
+const XR_SWAP_EYES = readXrBoolParam("xrSwapEyes", false);
+const XR_STEREO_ENABLED = readXrBoolParam("xrStereo", true);
 const XR_MONO = !XR_STEREO_ENABLED;
+const THREE_MODULE_URL = "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js";
 let vrEyeAspect = DEFAULT_VR_EYE_ASPECT;
 
 // HUD-Werte (werden später im Stream angezeigt)
@@ -552,6 +555,106 @@ function resetStreams() {
   if (vrRightVideo) vrRightVideo.srcObject = null;
 }
 
+function loadThreeModule() {
+  if (!threeModulePromise) {
+    threeModulePromise = import(THREE_MODULE_URL);
+  }
+  return threeModulePromise;
+}
+
+async function toggleSecondCamera(enabled) {
+  try {
+    const res = await fetch("/camera/second", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ enabled })
+    });
+
+    if (!res.ok) {
+      throw new Error(`Second camera switch failed: ${res.status}`);
+    }
+
+    xrSecondCameraEnabled = enabled;
+    return true;
+  } catch (error) {
+    console.warn("Zweite Kamera konnte nicht geschaltet werden:", error);
+    showFeedback(
+      enabled ? "⚠️ Zweite Kamera konnte nicht aktiviert werden." : "⚠️ Zweite Kamera konnte nicht deaktiviert werden.",
+      "error"
+    );
+    return false;
+  }
+}
+
+function createStereoVideoShaderMaterial(THREE, texture) {
+  const uniforms = {
+    map: { value: texture },
+    isVR: { value: false },
+    eyeIndex: { value: 0.0 },
+    videoResolution: { value: new THREE.Vector2(16, 9) },
+    eyeAspect: { value: DEFAULT_VR_EYE_ASPECT },
+    planeAspect: { value: DEFAULT_VR_EYE_ASPECT }
+  };
+
+  return new THREE.ShaderMaterial({
+    uniforms,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    vertexShader: `
+      varying vec2 vUv;
+
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      precision highp float;
+
+      uniform sampler2D map;
+      uniform bool isVR;
+      uniform float eyeIndex;
+      uniform vec2 videoResolution;
+      uniform float eyeAspect;
+      uniform float planeAspect;
+      varying vec2 vUv;
+
+      vec2 containUv(vec2 uv, float contentAspect, float viewportAspect) {
+        if (viewportAspect > contentAspect) {
+          float visibleWidth = contentAspect / viewportAspect;
+          uv.x = (uv.x - 0.5) / visibleWidth + 0.5;
+        } else {
+          float visibleHeight = viewportAspect / contentAspect;
+          uv.y = (uv.y - 0.5) / visibleHeight + 0.5;
+        }
+        return uv;
+      }
+
+      void main() {
+        float monoAspect = max(videoResolution.x / max(videoResolution.y, 1.0), 0.0001);
+        float cameraAspect = isVR ? eyeAspect : monoAspect;
+        vec2 uv = containUv(vUv, cameraAspect, max(planeAspect, 0.0001));
+
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+          gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+          return;
+        }
+
+        if (isVR) {
+          float sideBySideOffset = eyeIndex < 0.5 ? 0.0 : 0.5;
+          uv.x = uv.x * 0.5 + sideBySideOffset;
+        }
+
+        gl_FragColor = texture2D(map, uv);
+      }
+    `
+  });
+}
+
 function compileShader(gl, type, source) {
   const shader = gl.createShader(type);
   gl.shaderSource(shader, source);
@@ -860,6 +963,7 @@ async function waitForVrVideoReady(timeoutMs = 10000) {
 }
 
 async function createWebXrRenderer(session) {
+  const THREE = await loadThreeModule();
   const canvas = document.createElement("canvas");
   canvas.id = "webxr-vr-canvas";
   Object.assign(canvas.style, {
@@ -873,116 +977,87 @@ async function createWebXrRenderer(session) {
   });
   document.body.appendChild(canvas);
 
-  const gl = canvas.getContext("webgl", {
-    alpha: false,
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
     antialias: true,
-    xrCompatible: true
+    alpha: false
   });
-  if (!gl) throw new Error("WebGL wird auf diesem Gerät nicht unterstützt");
+  renderer.xr.enabled = true;
+  renderer.setClearColor(0x000000, 1);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
 
-  if (gl.makeXRCompatible) {
-    await gl.makeXRCompatible();
-  }
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / Math.max(window.innerHeight, 1), 0.01, 100);
+  const placeholderData = new Uint8Array([
+    0, 120, 255, 255,
+    255, 255, 255, 255,
+    255, 255, 255, 255,
+    0, 220, 120, 255
+  ]);
+  const placeholderTexture = new THREE.DataTexture(placeholderData, 2, 2, THREE.RGBAFormat);
+  placeholderTexture.needsUpdate = true;
 
-  const program = createProgram(gl, `
-    attribute vec2 a_position;
-    attribute vec2 a_texCoord;
-    uniform mat4 u_projectionMatrix;
-    uniform mat4 u_viewMatrix;
-    uniform vec2 u_planeScale;
-    uniform float u_planeDistance;
-    uniform float u_curvedMode;
-    uniform float u_halfFov;
-    uniform vec2 u_screenScale;
-    varying vec2 v_texCoord;
+  const material = createStereoVideoShaderMaterial(THREE, placeholderTexture);
+  const geometry = new THREE.PlaneGeometry(1, 1, 1, 1);
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.z = -3;
+  scene.add(mesh);
 
-    void main() {
-      if (u_curvedMode < -0.5) {
-        gl_Position = vec4(a_position * u_screenScale, 0.0, 1.0);
-        v_texCoord = a_texCoord;
+  const eyeProbe = new THREE.Vector3();
+  const leftProbe = new THREE.Vector3();
+  const rightProbe = new THREE.Vector3();
+
+  mesh.onBeforeRender = (activeRenderer, activeScene, activeCamera) => {
+    material.uniforms.isVR.value = activeRenderer.xr.isPresenting;
+    if (!activeRenderer.xr.isPresenting) {
+      material.uniforms.eyeIndex.value = 0.0;
+      return;
+    }
+
+    const xrCamera = activeRenderer.xr.getCamera(camera);
+    const eyeCameras = xrCamera?.cameras || [];
+    if (eyeCameras.length >= 2) {
+      if (activeCamera === eyeCameras[1]) {
+        material.uniforms.eyeIndex.value = 1.0;
+        return;
+      }
+      if (activeCamera === eyeCameras[0]) {
+        material.uniforms.eyeIndex.value = 0.0;
         return;
       }
 
-      vec4 worldPosition;
-      if (u_curvedMode > 0.5) {
-        float theta = a_position.x * u_halfFov;
-        worldPosition = vec4(
-          sin(theta) * u_planeDistance,
-          a_position.y * u_planeScale.y,
-          -cos(theta) * u_planeDistance,
-          1.0
-        );
-      } else {
-        worldPosition = vec4(
-          a_position.x * u_planeScale.x,
-          a_position.y * u_planeScale.y,
-          -u_planeDistance,
-          1.0
-        );
-      }
-      gl_Position = u_projectionMatrix * u_viewMatrix * worldPosition;
-      v_texCoord = a_texCoord;
+      activeCamera.getWorldPosition(eyeProbe);
+      eyeCameras[0].getWorldPosition(leftProbe);
+      eyeCameras[1].getWorldPosition(rightProbe);
+      material.uniforms.eyeIndex.value =
+        eyeProbe.distanceToSquared(rightProbe) < eyeProbe.distanceToSquared(leftProbe) ? 1.0 : 0.0;
     }
-  `, `
-    precision highp float;
-    uniform sampler2D u_texture;
-    uniform vec2 u_uvScale;
-    uniform vec2 u_uvOffset;
-    uniform float u_eyeOffset;
-    uniform float u_eyeScale;
-    uniform float u_monoOffset;
-    uniform float u_monoScale;
-    uniform float u_useMono;
-    uniform float u_verticalShift;
-    varying vec2 v_texCoord;
+  };
 
-    void main() {
-      vec2 uv = u_uvOffset + v_texCoord * u_uvScale;
-      uv.x = u_eyeOffset + uv.x * u_eyeScale;
-      uv.y = clamp(uv.y + u_verticalShift, 0.0, 1.0);
-
-      vec2 monoUv = u_uvOffset + v_texCoord * u_uvScale;
-      monoUv.x = u_monoOffset + monoUv.x * u_monoScale;
-
-      vec2 finalUv = mix(uv, monoUv, u_useMono);
-      gl_FragColor = texture2D(u_texture, finalUv);
-    }
-  `);
-
-  const vertexBuffer = gl.createBuffer();
-  const mesh = createXrMesh();
-  gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, mesh, gl.STATIC_DRAW);
+  const onResize = () => {
+    camera.aspect = window.innerWidth / Math.max(window.innerHeight, 1);
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+    updateWebXrPlaneLayout();
+  };
+  window.addEventListener("resize", onResize);
+  renderer.xr.addEventListener("sessionstart", handleWebXrSessionStarted);
+  renderer.xr.addEventListener("sessionend", handleWebXrSessionEnded);
 
   return {
     session,
+    THREE,
     canvas,
-    gl,
-    program,
-    vertexBuffer,
-    vertexCount: mesh.length / 4,
-    baseLayer: null,
-    referenceSpace: null,
-    leftTexture: createVideoTexture(gl),
-    rightTexture: createVideoTexture(gl),
-    positionLocation: gl.getAttribLocation(program, "a_position"),
-    texCoordLocation: gl.getAttribLocation(program, "a_texCoord"),
-    projectionMatrixLocation: gl.getUniformLocation(program, "u_projectionMatrix"),
-    viewMatrixLocation: gl.getUniformLocation(program, "u_viewMatrix"),
-    planeScaleLocation: gl.getUniformLocation(program, "u_planeScale"),
-    planeDistanceLocation: gl.getUniformLocation(program, "u_planeDistance"),
-    curvedModeLocation: gl.getUniformLocation(program, "u_curvedMode"),
-    halfFovLocation: gl.getUniformLocation(program, "u_halfFov"),
-    textureLocation: gl.getUniformLocation(program, "u_texture"),
-    uvScaleLocation: gl.getUniformLocation(program, "u_uvScale"),
-    uvOffsetLocation: gl.getUniformLocation(program, "u_uvOffset"),
-    eyeOffsetLocation: gl.getUniformLocation(program, "u_eyeOffset"),
-    eyeScaleLocation: gl.getUniformLocation(program, "u_eyeScale"),
-    monoOffsetLocation: gl.getUniformLocation(program, "u_monoOffset"),
-    monoScaleLocation: gl.getUniformLocation(program, "u_monoScale"),
-    useMonoLocation: gl.getUniformLocation(program, "u_useMono"),
-    verticalShiftLocation: gl.getUniformLocation(program, "u_verticalShift"),
-    screenScaleLocation: gl.getUniformLocation(program, "u_screenScale"),
+    renderer,
+    scene,
+    camera,
+    mesh,
+    geometry,
+    material,
+    videoTexture: null,
+    placeholderTexture,
+    onResize,
     stereoSbs: false,
     videoReady: false,
     startedAt: performance.now(),
@@ -1001,14 +1076,7 @@ async function startWebXrSession() {
       optionalFeatures: ["local-floor", "hand-tracking"]
     });
     xrState = await createWebXrRenderer(xrSession);
-    xrState.baseLayer = new XRWebGLLayer(xrSession, xrState.gl);
-    xrSession.updateRenderState({ baseLayer: xrState.baseLayer });
-    try {
-      xrState.referenceSpace = await xrSession.requestReferenceSpace("local");
-    } catch {
-      xrState.referenceSpace = await xrSession.requestReferenceSpace("viewer");
-    }
-    xrSession.addEventListener("end", handleWebXrSessionEnded);
+    await xrState.renderer.xr.setSession(xrSession);
     document.addEventListener("keydown", handlePresentationExitKey);
     xrState.canvas.addEventListener("dblclick", exitPresentationMode);
     statusTxt.textContent = "👓 WebXR-VR aktiv";
@@ -1034,20 +1102,75 @@ function startWebXrRenderLoop() {
   if (!xrSession || !xrState || xrRenderLoopStarted) return;
   xrRenderLoopStarted = true;
   xrTextureErrorLogged = false;
-  xrSession.requestAnimationFrame(renderWebXrFrame);
+  updateWebXrPlaneLayout();
+  xrState.renderer.setAnimationLoop(renderWebXrFrame);
 }
 
-function renderWebXrFrame(time, frame) {
+function setWebXrVideoElement(videoEl, stereoSbs = true) {
+  if (!xrState || !videoEl) return;
+
+  const { THREE, material } = xrState;
+  if (xrState.videoTexture) {
+    xrState.videoTexture.dispose();
+  }
+
+  const texture = new THREE.VideoTexture(videoEl);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.generateMipmaps = false;
+  if ("SRGBColorSpace" in THREE) {
+    texture.colorSpace = THREE.SRGBColorSpace;
+  }
+
+  xrState.videoTexture = texture;
+  xrState.stereoSbs = stereoSbs;
+  material.uniforms.map.value = texture;
+  material.uniforms.isVR.value = true;
+  updateWebXrPlaneLayout();
+}
+
+function updateWebXrPlaneLayout() {
+  if (!xrState) return;
+
+  const videoEl = vrLeftVideo || video;
+  const stereoSbs = xrState.stereoSbs;
+  const layout = getAdaptiveXrPlane(videoEl, stereoSbs);
+  const aspect = getEyeVideoAspect(videoEl, stereoSbs);
+  const width = layout.width;
+  const height = width / Math.max(aspect || DEFAULT_VR_EYE_ASPECT, 0.0001);
+
+  xrState.mesh.position.set(0, 0, -layout.distance);
+  xrState.mesh.scale.set(width, height, 1);
+  xrState.material.uniforms.eyeAspect.value = aspect || DEFAULT_VR_EYE_ASPECT;
+  xrState.material.uniforms.planeAspect.value = width / Math.max(height, 0.0001);
+
+  if (videoEl?.videoWidth && videoEl?.videoHeight) {
+    xrState.material.uniforms.videoResolution.value.set(videoEl.videoWidth, videoEl.videoHeight);
+  }
+}
+
+function renderWebXrFrame() {
   if (!xrSession || !xrState) return;
 
-  const { gl, program, vertexBuffer, baseLayer, referenceSpace } = xrState;
-  const pose = frame.getViewerPose(referenceSpace);
-  xrSession.requestAnimationFrame(renderWebXrFrame);
-  if (!pose) return;
+  const videoEl = vrLeftVideo;
+  const hasVideoFrame = Boolean(
+    videoEl &&
+    videoEl.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+    videoEl.videoWidth > 0 &&
+    videoEl.videoHeight > 0
+  );
 
-  const leftTextureReady = updateVideoTexture(gl, xrState.leftTexture, vrLeftVideo);
-  const rightTextureReady = xrState.stereoSbs ? leftTextureReady : updateVideoTexture(gl, xrState.rightTexture, vrRightVideo);
-  xrState.videoReady = xrState.videoReady || Boolean(leftTextureReady && rightTextureReady);
+  if (hasVideoFrame && !xrState.videoTexture) {
+    setWebXrVideoElement(videoEl, vrStereoSbs);
+  }
+
+  if (hasVideoFrame) {
+    xrState.videoReady = true;
+    updateWebXrPlaneLayout();
+  }
+
   if (xrState.videoReady && !xrState.firstVideoFrameAt) {
     xrState.firstVideoFrameAt = performance.now();
     if (statusTxt) statusTxt.textContent = "👓 WebXR-Video sichtbar";
@@ -1060,67 +1183,32 @@ function renderWebXrFrame(time, frame) {
     return;
   }
 
-  gl.bindFramebuffer(gl.FRAMEBUFFER, baseLayer.framebuffer);
-  gl.clearColor(0, 0, 0, 1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.disable(gl.CULL_FACE);
-  gl.disable(gl.DEPTH_TEST);
-  gl.useProgram(program);
-  gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-  gl.enableVertexAttribArray(xrState.positionLocation);
-  gl.vertexAttribPointer(xrState.positionLocation, 2, gl.FLOAT, false, 16, 0);
-  gl.enableVertexAttribArray(xrState.texCoordLocation);
-  gl.vertexAttribPointer(xrState.texCoordLocation, 2, gl.FLOAT, false, 16, 8);
-  gl.uniform1i(xrState.textureLocation, 0);
-  gl.activeTexture(gl.TEXTURE0);
+  xrState.renderer.render(xrState.scene, xrState.camera);
+}
 
-  for (const view of pose.views) {
-    const viewport = baseLayer.getViewport(view);
-    const isLeftEye = view.eye !== "right";
-    const eyeVideo = xrState.stereoSbs ? vrLeftVideo : (isLeftEye ? vrLeftVideo : vrRightVideo);
-    const eyeTexture = xrState.stereoSbs ? xrState.leftTexture : (isLeftEye ? xrState.leftTexture : xrState.rightTexture);
-    const stereoWindow = getStereoUvWindow(isLeftEye, xrState.stereoSbs);
-    const monoWindow = getMonoUvWindow(xrState.stereoSbs);
-    const layout = getVideoLayout(eyeVideo, xrState.stereoSbs);
-    const screenScale = getScreenContainScale(eyeVideo, xrState.stereoSbs, viewport);
-
-    gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
-    gl.bindTexture(gl.TEXTURE_2D, eyeTexture);
-    gl.uniformMatrix4fv(xrState.projectionMatrixLocation, false, view.projectionMatrix);
-    gl.uniformMatrix4fv(xrState.viewMatrixLocation, false, view.transform.inverse.matrix);
-    gl.uniform2fv(xrState.planeScaleLocation, layout.planeScale);
-    gl.uniform1f(xrState.planeDistanceLocation, layout.distance);
-    gl.uniform1f(
-      xrState.curvedModeLocation,
-      XR_RENDER_MODE === "screen" ? -1 : (XR_RENDER_MODE === "plane" ? 0 : 1)
-    );
-    gl.uniform1f(xrState.halfFovLocation, layout.halfFov);
-    gl.uniform2fv(xrState.uvScaleLocation, layout.uvScale);
-    gl.uniform2fv(xrState.uvOffsetLocation, layout.uvOffset);
-    gl.uniform1f(xrState.eyeOffsetLocation, stereoWindow.offset);
-    gl.uniform1f(xrState.eyeScaleLocation, stereoWindow.scale);
-    gl.uniform1f(xrState.monoOffsetLocation, monoWindow.offset);
-    gl.uniform1f(xrState.monoScaleLocation, monoWindow.scale);
-    gl.uniform1f(xrState.useMonoLocation, xrState.stereoSbs && XR_MONO ? 1.0 : 0.0);
-    gl.uniform1f(xrState.verticalShiftLocation, stereoWindow.verticalShift || 0.0);
-    gl.uniform2fv(xrState.screenScaleLocation, screenScale);
-    gl.drawArrays(gl.TRIANGLES, 0, xrState.vertexCount);
+async function handleWebXrSessionStarted() {
+  if (xrState?.material) {
+    xrState.material.uniforms.isVR.value = true;
   }
+  await toggleSecondCamera(true);
 }
 
 function cleanupWebXrRenderer() {
-  if (xrSession) {
-    xrSession.removeEventListener("end", handleWebXrSessionEnded);
-  }
   document.removeEventListener("keydown", handlePresentationExitKey);
   if (xrState) {
-    const { gl } = xrState;
-    if (gl) {
-      if (xrState.leftTexture) gl.deleteTexture(xrState.leftTexture);
-      if (xrState.rightTexture) gl.deleteTexture(xrState.rightTexture);
-      if (xrState.vertexBuffer) gl.deleteBuffer(xrState.vertexBuffer);
-      if (xrState.program) gl.deleteProgram(xrState.program);
+    if (xrState.renderer) {
+      xrState.renderer.setAnimationLoop(null);
+      xrState.renderer.xr.removeEventListener("sessionstart", handleWebXrSessionStarted);
+      xrState.renderer.xr.removeEventListener("sessionend", handleWebXrSessionEnded);
     }
+    if (xrState.onResize) {
+      window.removeEventListener("resize", xrState.onResize);
+    }
+    if (xrState.videoTexture) xrState.videoTexture.dispose();
+    if (xrState.placeholderTexture) xrState.placeholderTexture.dispose();
+    if (xrState.geometry) xrState.geometry.dispose();
+    if (xrState.material) xrState.material.dispose();
+    if (xrState.renderer) xrState.renderer.dispose();
     if (xrState.canvas) xrState.canvas.remove();
   }
   if (xrVideoHost) {
@@ -1142,9 +1230,12 @@ function handlePresentationExitKey(event) {
 
 async function exitPresentationMode() {
   if (xrSession) {
-    await exitVrUi();
-    await switchStreamMode(false);
+    const wasVr = vrMode;
     vrMode = false;
+    await exitVrUi();
+    if (wasVr) {
+      await switchStreamMode(false);
+    }
     return;
   }
 
@@ -1196,6 +1287,7 @@ async function endWebXrSession() {
 
 function handleWebXrSessionEnded() {
   const shouldReturnToNormal = vrMode;
+  void toggleSecondCamera(false);
   cleanupWebXrRenderer();
   if (shouldReturnToNormal) {
     vrMode = false;
@@ -1283,6 +1375,7 @@ function attachVrStreams(leftStream, rightStream = null) {
     attachHiddenXrVideo(vrLeftVideo);
     attachHiddenXrVideo(vrRightVideo);
     if (xrState) xrState.stereoSbs = vrStereoSbs;
+    setWebXrVideoElement(vrLeftVideo, vrStereoSbs);
     monitorFPS(vrLeftVideo);
     vrLeftVideo.play().catch(() => {});
     vrRightVideo?.play().catch(() => {});
@@ -1315,6 +1408,7 @@ function attachXrMonoStream(stream) {
   attachHiddenXrVideo(vrLeftVideo);
   attachHiddenXrVideo(vrRightVideo);
   if (xrState) xrState.stereoSbs = false;
+  setWebXrVideoElement(vrLeftVideo, false);
   monitorFPS(vrLeftVideo);
   vrLeftVideo.play().catch(() => {});
   vrRightVideo.play().catch(() => {});
@@ -1399,7 +1493,7 @@ function createOverlay() {
   overlay.className = "control-overlay";
   overlay.innerHTML = `
     <button class="overlay-btn" title="Neu verbinden" onclick="restartStream()">🔄</button>
-    <button class="overlay-btn" title="Vision Pro Ansicht" onclick="enterVisionProMode()">👓</button>
+    <button class="overlay-btn" title="Enter VR" onclick="enterVisionProMode()">👓</button>
     ${isAdmin ? `<button class="overlay-btn" title="Benutzerverwaltung" onclick="openAdminPanel()">🛠️</button>` : ""}
     <button class="overlay-btn" title="Abmelden" onclick="logoutUser()">🚪</button>
   `;
@@ -1592,10 +1686,7 @@ async function toggleView() {
 
 // Vollbildmodus aktivieren
 function enterVisionProMode() {
-  if (getBrowserFullscreenElement() || video?.webkitDisplayingFullscreen) {
-    return;
-  }
-  toggleFullscreen();
+  toggleView();
 }
 
 function toggleFullscreen() {

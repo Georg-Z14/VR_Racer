@@ -89,6 +89,7 @@ class CameraManager:
         self._sensitivity = sensitivity
         self._lock = threading.Lock()
         self._vr_clients = 0
+        self._manual_second_camera_enabled = False
 
         print(
             f"🎥 Camera cfg: size={target_size[0]}x{target_size[1]} "
@@ -116,34 +117,49 @@ class CameraManager:
         self.camera_left_proc = None
         self.camera_left_track = None
 
+    def _ensure_left_camera_locked(self):
+        if self.camera_left_proc is not None:
+            return
+        self.camera_left_proc = CameraProcess(
+            camera_index=CAMERA_LEFT_INDEX,
+            target_size=self._target_size,
+            max_fps=CAMERA_MAX_FPS,
+            use_all_cores=CAMERA_USE_ALL_CORES,
+            pixel_format=CAMERA_PIXEL_FORMAT,
+            frame_format=CAMERA_FRAME_FORMAT,
+            swap_rb=CAMERA_SWAP_RB,
+            color_convert=CAMERA_COLOR_CONVERT,
+            test_pattern=CAMERA_TEST_PATTERN,
+            buffer_count=CAMERA_BUFFER_COUNT,
+            queue=CAMERA_QUEUE,
+        )
+        self.camera_left_track = self.camera_left_proc.create_track()
+
+    def _stop_left_camera_if_idle_locked(self):
+        if self._vr_clients == 0 and not self._manual_second_camera_enabled:
+            if self.camera_left_proc:
+                self.camera_left_proc.stop()
+                self.camera_left_proc = None
+                self.camera_left_track = None
+
+    def set_second_camera(self, enabled: bool):
+        with self._lock:
+            self._manual_second_camera_enabled = enabled
+            if enabled:
+                self._ensure_left_camera_locked()
+            else:
+                self._stop_left_camera_if_idle_locked()
+
     def acquire_vr(self):
         with self._lock:
-            if self.camera_left_proc is None:
-                self.camera_left_proc = CameraProcess(
-                    camera_index=CAMERA_LEFT_INDEX,
-                    target_size=self._target_size,
-                    max_fps=CAMERA_MAX_FPS,
-                    use_all_cores=CAMERA_USE_ALL_CORES,
-                    pixel_format=CAMERA_PIXEL_FORMAT,
-                    frame_format=CAMERA_FRAME_FORMAT,
-                    swap_rb=CAMERA_SWAP_RB,
-                    color_convert=CAMERA_COLOR_CONVERT,
-                    test_pattern=CAMERA_TEST_PATTERN,
-                    buffer_count=CAMERA_BUFFER_COUNT,
-                    queue=CAMERA_QUEUE,
-                )
-                self.camera_left_track = self.camera_left_proc.create_track()
+            self._ensure_left_camera_locked()
             self._vr_clients += 1
 
     def release_vr(self):
         with self._lock:
             if self._vr_clients > 0:
                 self._vr_clients -= 1
-            if self._vr_clients == 0:
-                if self.camera_left_proc:
-                    self.camera_left_proc.stop()
-                    self.camera_left_proc = None
-                    self.camera_left_track = None
+            self._stop_left_camera_if_idle_locked()
 
     def get_tracks(self, vr_mode: bool):
         if not vr_mode:
@@ -459,6 +475,20 @@ async def register(request: web.Request) -> web.Response:
 async def ping(request: web.Request) -> web.Response:
     return web.Response(status=204)
 
+async def camera_second(request: web.Request) -> web.Response:
+    user = require_auth(request)
+    if not user:
+        return web.Response(status=401, text="Unauthorized")
+
+    try:
+        data = await request.json()
+        enabled = bool(data.get("enabled", False))
+        camera_manager.set_second_camera(enabled)
+        return web.json_response({"enabled": enabled})
+    except Exception:
+        print("💥 [/camera/second] Fehler:\n" + traceback.format_exc())
+        return web.Response(status=500, text="Camera switch error")
+
 async def offer(request: web.Request) -> web.Response:
     user = require_auth(request)
     if not user:
@@ -578,6 +608,7 @@ def create_app() -> web.Application:
     app.router.add_get("/dashboard", dashboard)
     app.router.add_get("/client1.js", javascript)
     app.router.add_get("/ping", ping)
+    app.router.add_post("/camera/second", camera_second)
     app.router.add_post("/login", login)
     app.router.add_post("/register", register)
     app.router.add_post("/offer", offer)
