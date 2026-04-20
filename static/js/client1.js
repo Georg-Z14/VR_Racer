@@ -1537,7 +1537,7 @@ function createOverlay() {
   overlay.className = "control-overlay";
   overlay.innerHTML = `
     <button class="overlay-btn" title="Neu verbinden" onclick="restartStream()">🔄</button>
-    <button class="overlay-btn" title="Enter VR" onclick="enterVisionProMode()">👓</button>
+    <button class="overlay-btn" title="Vollbild" onclick="enterVisionProMode()">⛶</button>
     ${isAdmin ? `<button class="overlay-btn" title="Benutzerverwaltung" onclick="openAdminPanel()">🛠️</button>` : ""}
     <button class="overlay-btn" title="Abmelden" onclick="logoutUser()">🚪</button>
   `;
@@ -1728,9 +1728,40 @@ async function toggleView() {
    🔧 HILFSFUNKTIONEN
 ===================================================== */
 
-// Vollbildmodus aktivieren
-function enterVisionProMode() {
-  toggleView();
+// Sauberen Mono-Vollbildmodus aktivieren. Kein WebXR, keine zweite Kamera.
+async function enterVisionProMode() {
+  if (connecting) return;
+
+  if (xrSession || vrMode || document.getElementById("vr-sbs-wrap")) {
+    vrMode = false;
+    vrPreparingWebXr = false;
+    await exitVrUi();
+    await switchStreamMode(false);
+  } else {
+    await toggleSecondCamera(false);
+  }
+
+  requestCleanFullscreen();
+  if (statusTxt) statusTxt.textContent = "🖥 Vollbild aktiv";
+}
+
+function requestCleanFullscreen() {
+  if (getBrowserFullscreenElement() || video?.webkitDisplayingFullscreen) {
+    return;
+  }
+
+  const target = document.getElementById("player-wrap") || video;
+  if (!target) return;
+
+  const requestPromise = target.requestFullscreen?.() || target.webkitRequestFullscreen?.();
+  if (requestPromise?.catch) {
+    requestPromise.catch(() => {
+      if (video?.webkitEnterFullscreen) video.webkitEnterFullscreen();
+    });
+  } else if (video?.webkitEnterFullscreen && !getBrowserFullscreenElement()) {
+    video.webkitEnterFullscreen();
+  }
+  setFullscreenActive(true);
 }
 
 function toggleFullscreen() {
@@ -1744,17 +1775,7 @@ function toggleFullscreen() {
     return;
   }
 
-  const target = document.getElementById("vr-sbs-wrap") || document.getElementById("player-wrap") || video;
-  if (!target) return;
-  const requestPromise = target.requestFullscreen?.() || target.webkitRequestFullscreen?.();
-  if (requestPromise?.catch) {
-    requestPromise.catch(() => {
-      if (video?.webkitEnterFullscreen) video.webkitEnterFullscreen();
-    });
-  } else if (video?.webkitEnterFullscreen && !getBrowserFullscreenElement()) {
-    if (video?.webkitEnterFullscreen) video.webkitEnterFullscreen();
-  }
-  setFullscreenActive(true);
+  requestCleanFullscreen();
 }
 
 // Seite neu laden (z. B. bei Streamfehler)
