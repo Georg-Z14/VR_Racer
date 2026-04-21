@@ -97,6 +97,14 @@ function getMediaMtxWhepUrl() {
   return url.endsWith("/whep") ? url : `${url.replace(/\/$/, "")}/whep`;
 }
 
+function getMediaMtxPlayerUrl() {
+  const url = new URL(getMediaMtxWebrtcUrl(), window.location.href);
+  url.searchParams.set("controls", "0");
+  url.searchParams.set("muted", "1");
+  url.searchParams.set("autoplay", "1");
+  return url.toString();
+}
+
 function detachMediaMtxPlayer() {
   if (mediaMtxFrame) {
     mediaMtxFrame.remove();
@@ -123,7 +131,7 @@ function attachMediaMtxPlayerFallback() {
     playerWrap.insertBefore(mediaMtxFrame, document.getElementById("fullscreen-exit-btn"));
   }
 
-  mediaMtxFrame.src = getMediaMtxWebrtcUrl();
+  mediaMtxFrame.src = getMediaMtxPlayerUrl();
   currentStream = null;
   hudFps = "🎥 MediaMTX";
   updateHudDisplay();
