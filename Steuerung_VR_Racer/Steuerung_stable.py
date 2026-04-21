@@ -35,6 +35,8 @@ DEADZONE_STICK = 0.08         # Totzone für Analogstick
 DEADZONE_TRIGGER = 0.05       # Totzone für Trigger
 MOTOR_MAX_SPEED = float(os.getenv("MOTOR_MAX_SPEED", "0.25"))
 SERVO_MAX_OUTPUT = max(0.0, min(1.0, float(os.getenv("SERVO_MAX_OUTPUT", "0.25"))))
+SERVO_DETACH_ON_NEUTRAL = os.getenv("SERVO_DETACH_ON_NEUTRAL", "0").strip().lower() in ("1", "true", "yes", "on")
+SERVO_UPDATE_EPSILON = float(os.getenv("SERVO_UPDATE_EPSILON", "0.005"))
 STEERING_INVERTED = os.getenv("STEERING_INVERTED", "0").strip().lower() in ("1", "true", "yes", "on")
 DEBUG_CONTROLLER = os.getenv("DEBUG_CONTROLLER", "0").strip().lower() in ("1", "true", "yes", "on")
 
@@ -143,14 +145,18 @@ def set_servo(angle_deg: float):
     clamped = max(-MAX_STEER_ANGLE, min(MAX_STEER_ANGLE, angle_deg))
     value = (clamped / MAX_STEER_ANGLE) * SERVO_MAX_OUTPUT
 
-    # Wenn nahezu neutral -> Servo deaktivieren
+    # Neutral aktiv halten. detach() kann bei RC-Lenkservos dazu fuehren,
+    # dass die Lenkung nach einiger Zeit nicht mehr zuverlaessig anspricht.
     if abs(value) < 0.02:
-        servo.detach()
+        if SERVO_DETACH_ON_NEUTRAL:
+            servo.detach()
+        else:
+            servo.value = 0.0
         last_servo_value = 0.0
         return
 
     # Nur aktualisieren, wenn sich der Wert merklich geändert hat
-    if abs(value - last_servo_value) < 0.02:
+    if abs(value - last_servo_value) < SERVO_UPDATE_EPSILON:
         return
 
     # Sanfte Bewegung (Smoothing)
