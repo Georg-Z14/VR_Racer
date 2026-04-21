@@ -33,7 +33,7 @@ if hasattr(sys.stdout, "reconfigure"):
 MAX_STEER_ANGLE = 25.0        # maximaler Lenkwinkel
 DEADZONE_STICK = 0.08         # Totzone für Analogstick
 DEADZONE_TRIGGER = 0.05       # Totzone für Trigger
-MOTOR_MAX_SPEED = float(os.getenv("MOTOR_MAX_SPEED", "0.65"))
+MOTOR_MAX_SPEED = float(os.getenv("MOTOR_MAX_SPEED", "0.25"))
 SERVO_MAX_OUTPUT = max(0.0, min(1.0, float(os.getenv("SERVO_MAX_OUTPUT", "0.25"))))
 STEERING_INVERTED = os.getenv("STEERING_INVERTED", "0").strip().lower() in ("1", "true", "yes", "on")
 DEBUG_CONTROLLER = os.getenv("DEBUG_CONTROLLER", "0").strip().lower() in ("1", "true", "yes", "on")
