@@ -25,6 +25,7 @@ let xrSecondCameraEnabled = false;
 let streamConfig = null;
 let streamConfigPromise = null;
 let mediaMtxSessionUrl = null;
+let mediaMtxFrame = null;
 const XR_VIDEO_FIT_MODE = "contain"; // "contain" verhindert gestauchte WebXR-Bilder.
 const XR_RENDER_MODE = new URLSearchParams(window.location.search).get("xrMode") || "screen";
 const XR_DISTANCE_OVERRIDE = readXrNumberParam("xrDistance", null);
@@ -96,6 +97,41 @@ function getMediaMtxWhepUrl() {
   return url.endsWith("/whep") ? url : `${url.replace(/\/$/, "")}/whep`;
 }
 
+function detachMediaMtxPlayer() {
+  if (mediaMtxFrame) {
+    mediaMtxFrame.remove();
+    mediaMtxFrame = null;
+  }
+  if (video) video.style.display = "";
+}
+
+function attachMediaMtxPlayerFallback() {
+  const playerWrap = document.getElementById("player-wrap");
+  if (!playerWrap) return false;
+
+  if (video) {
+    video.srcObject = null;
+    video.style.display = "none";
+  }
+
+  if (!mediaMtxFrame) {
+    mediaMtxFrame = document.createElement("iframe");
+    mediaMtxFrame.id = "mediamtx-player";
+    mediaMtxFrame.title = "MediaMTX WebRTC Stream";
+    mediaMtxFrame.allow = "autoplay; fullscreen; encrypted-media";
+    mediaMtxFrame.setAttribute("allowfullscreen", "");
+    playerWrap.insertBefore(mediaMtxFrame, document.getElementById("fullscreen-exit-btn"));
+  }
+
+  mediaMtxFrame.src = getMediaMtxWebrtcUrl();
+  currentStream = null;
+  hudFps = "🎥 MediaMTX";
+  updateHudDisplay();
+  createOverlay();
+  statusTxt.textContent = "✅ MediaMTX Player verbunden";
+  return true;
+}
+
 function attachIncomingStream(stream, vr, xrMonoStream) {
   if (xrMonoStream) {
     vrStreams.push(stream);
@@ -146,7 +182,9 @@ async function closeMediaMtxSession() {
 }
 
 async function startMediaMtxStream({ vr = false, xrMonoStream = false } = {}) {
-  pc = new RTCPeerConnection();
+  pc = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+  });
   const transceiver = pc.addTransceiver("video", { direction: "recvonly" });
   preferVideoCodec(transceiver);
 
@@ -694,6 +732,7 @@ function resetStreams() {
   vrStreams = [];
   vrStereoSbs = false;
   if (video) video.srcObject = null;
+  detachMediaMtxPlayer();
   if (vrLeftVideo) vrLeftVideo.srcObject = null;
   if (vrRightVideo) vrRightVideo.srcObject = null;
 }
@@ -1637,8 +1676,12 @@ async function start({ vr = false, xrMonoStream = false } = {}) {
     return await startMediaMtxStream({ vr, xrMonoStream });
   } catch (error) {
     console.warn("MediaMTX stream failed:", error);
-    statusTxt.textContent = "⚠️ Stream-Fehler!";
     await stopConnection();
+    await loadStreamConfig();
+    if (!vr && !xrMonoStream && attachMediaMtxPlayerFallback()) {
+      return true;
+    }
+    statusTxt.textContent = "⚠️ Stream-Fehler!";
     return false;
   } finally {
     connecting = false;
