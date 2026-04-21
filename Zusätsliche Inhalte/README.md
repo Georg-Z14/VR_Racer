@@ -210,6 +210,24 @@ quit
 
 Die Steuerung fragt beim Start nicht interaktiv nach einem Eingabegeraet, damit der systemd-Dienst nicht haengen bleibt. Falls automatisch das falsche Eingabegeraet gewaehlt wird, kann in `.env` optional `CONTROLLER_DEVICE_PATH=/dev/input/...` gesetzt werden.
 
+Controller abmelden:
+
+```text
+PS + Options
+```
+
+Falls die PS-Taste nicht als normales Linux-Event ankommt:
+
+```text
+Create/Share + Options
+```
+
+Die Tastenkombination stoppt Motor und Servo sofort, trennt den Controller wenn moeglich per Bluetooth und beendet den Controller-Dienst sauber. Wieder aktivieren:
+
+```bash
+sudo systemctl start vr-racer-controller.service
+```
+
 ## Autostart nach Akkuwechsel
 
 Die Services starten nach einem Neustart automatisch:

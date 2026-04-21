@@ -11,6 +11,8 @@ Verbesserungen:
 """
 
 import os
+import re
+import subprocess
 import sys
 import time
 
@@ -31,6 +33,7 @@ if hasattr(sys.stdout, "reconfigure"):
 MAX_STEER_ANGLE = 25.0        # maximaler Lenkwinkel
 DEADZONE_STICK = 0.08         # Totzone für Analogstick
 DEADZONE_TRIGGER = 0.05       # Totzone für Trigger
+MOTOR_MAX_SPEED = float(os.getenv("MOTOR_MAX_SPEED", "0.65"))
 
 SERVO_PIN = 18                # Servo GPIO
 MOTOR_IN1 = 17                # Motor Richtung
@@ -56,6 +59,35 @@ IGNORED_DEVICE_NAMES = (
     "touchpad",
     "touchscreen",
 )
+
+DISCONNECT_BUTTON_COMBOS = tuple(
+    combo
+    for combo in (
+        frozenset(
+            code
+            for code in (
+                getattr(ecodes, "BTN_MODE", None),   # PS-Taste
+                getattr(ecodes, "BTN_START", None),  # Options
+            )
+            if code is not None
+        ),
+        frozenset(
+            code
+            for code in (
+                getattr(ecodes, "BTN_SELECT", None), # Create/Share
+                getattr(ecodes, "BTN_START", None),  # Options
+            )
+            if code is not None
+        ),
+    )
+    if len(combo) == 2
+)
+
+MAC_ADDRESS_PATTERN = re.compile(r"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}")
+
+
+class ControllerDisconnectRequested(Exception):
+    pass
 
 
 # =========================
@@ -140,6 +172,8 @@ def set_motor(speed: float):
     - 0: Stop
     """
 
+    speed = max(-MOTOR_MAX_SPEED, min(MOTOR_MAX_SPEED, speed))
+
     if speed > 0:
         IN1.on()
         IN2.off()
@@ -168,6 +202,110 @@ def emergency_stop():
     """
     set_motor(0.0)
     servo.detach()
+
+
+# =========================
+# CONTROLLER ABMELDUNG
+# =========================
+
+def is_disconnect_combo_pressed(pressed_keys):
+    return any(combo <= pressed_keys for combo in DISCONNECT_BUTTON_COMBOS)
+
+
+def get_controller_bluetooth_address(dev):
+    for value in (getattr(dev, "uniq", ""), getattr(dev, "phys", "")):
+        match = MAC_ADDRESS_PATTERN.search(str(value))
+        if match:
+            return match.group(0)
+    return ""
+
+
+def disconnect_controller(dev):
+    emergency_stop()
+    bluetooth_address = get_controller_bluetooth_address(dev)
+
+    if not bluetooth_address:
+        print("Keine Bluetooth-Adresse gefunden, beende nur die lokale Steuerung.")
+        return
+
+    print(f"Trenne Controller per Bluetooth: {bluetooth_address}")
+
+    try:
+        subprocess.run(
+            ["bluetoothctl", "disconnect", bluetooth_address],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except Exception as exc:
+        print(f"Bluetooth-Trennung fehlgeschlagen: {exc}")
+
+
+# =========================
+# TRIGGER KALIBRIERUNG
+# =========================
+
+def clamp(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
+    return max(lower, min(upper, value))
+
+
+def get_abs_info(dev, code):
+    try:
+        return dev.absinfo(code)
+    except Exception:
+        return None
+
+
+def build_trigger_calibration(dev, code):
+    """
+    Manche Controller melden Trigger losgelassen als 0, andere als 255.
+    Wir verwenden den Wert beim Verbinden als Neutralpunkt und berechnen
+    daraus die richtige Richtung.
+    """
+    info = get_abs_info(dev, code)
+    if info is None:
+        return {
+            "min": 0,
+            "max": 255,
+            "neutral": 0,
+            "inverted": False,
+        }
+
+    raw_min = info.min
+    raw_max = info.max
+    neutral = info.value
+    mid = raw_min + ((raw_max - raw_min) / 2)
+
+    return {
+        "min": raw_min,
+        "max": raw_max,
+        "neutral": neutral,
+        "inverted": neutral >= mid,
+    }
+
+
+def normalize_trigger(raw_value: int, calibration) -> float:
+    raw_min = calibration["min"]
+    raw_max = calibration["max"]
+    neutral = calibration["neutral"]
+
+    if calibration["inverted"]:
+        span = max(1, neutral - raw_min)
+        return clamp((neutral - raw_value) / span)
+
+    span = max(1, raw_max - neutral)
+    return clamp((raw_value - neutral) / span)
+
+
+def print_trigger_calibration(label: str, calibration):
+    direction = "invertiert" if calibration["inverted"] else "normal"
+    print(
+        f"{label}: min={calibration['min']} "
+        f"neutral={calibration['neutral']} "
+        f"max={calibration['max']} "
+        f"richtung={direction}"
+    )
 
 
 # =========================
@@ -293,12 +431,33 @@ def main():
 
         print(f"Verbunden mit: {gamepad.name}")
 
-        r2 = 0.0
+        l2_calibration = build_trigger_calibration(gamepad, ecodes.ABS_Z)
+        r2_calibration = build_trigger_calibration(gamepad, ecodes.ABS_RZ)
+        print_trigger_calibration("L2", l2_calibration)
+        print_trigger_calibration("R2", r2_calibration)
+        print("Motor bleibt gesperrt, bis L2/R2 losgelassen sind.")
+
         l2 = 0.0
+        r2 = 0.0
+        motor_armed = False
+        pressed_keys = set()
 
         try:
             # Event Loop für Controller
             for event in gamepad.read_loop():
+
+                if event.type == ecodes.EV_KEY:
+                    if event.value:
+                        pressed_keys.add(event.code)
+                    else:
+                        pressed_keys.discard(event.code)
+
+                    if is_disconnect_combo_pressed(pressed_keys):
+                        print("Controller-Abmeldung erkannt: PS+Options oder Create+Options.")
+                        disconnect_controller(gamepad)
+                        raise ControllerDisconnectRequested
+
+                    continue
 
                 if event.type != ecodes.EV_ABS:
                     continue
@@ -314,11 +473,19 @@ def main():
 
                 # Trigger links (Rückwärts)
                 elif event.code == ecodes.ABS_Z:
-                    l2 = event.value / 255.0
+                    l2 = normalize_trigger(event.value, l2_calibration)
 
                 # Trigger rechts (Vorwärts)
                 elif event.code == ecodes.ABS_RZ:
-                    r2 = event.value / 255.0
+                    r2 = normalize_trigger(event.value, r2_calibration)
+
+                if not motor_armed:
+                    if l2 <= DEADZONE_TRIGGER and r2 <= DEADZONE_TRIGGER:
+                        motor_armed = True
+                        print("Motor freigegeben.")
+                    else:
+                        set_motor(0.0)
+                        continue
 
                 # Geschwindigkeit berechnen
                 speed = r2 - l2
@@ -336,6 +503,10 @@ def main():
         except KeyboardInterrupt:
             print("Programm beendet")
             emergency_stop()
+            break
+
+        except ControllerDisconnectRequested:
+            print("Controller-Steuerung beendet.")
             break
 
         finally:

@@ -65,7 +65,7 @@ User=$INSTALL_USER
 Group=$INSTALL_GROUP
 WorkingDirectory=$PROJECT_DIR
 ExecStart=$PROJECT_DIR/scripts/start_controller.sh
-Restart=always
+Restart=on-failure
 RestartSec=3
 
 [Install]
