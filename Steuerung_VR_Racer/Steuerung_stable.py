@@ -35,6 +35,10 @@ DEADZONE_STICK = 0.08         # Totzone für Analogstick
 DEADZONE_TRIGGER = 0.05       # Totzone für Trigger
 MOTOR_MAX_SPEED = float(os.getenv("MOTOR_MAX_SPEED", "0.65"))
 STEERING_INVERTED = os.getenv("STEERING_INVERTED", "0").strip().lower() in ("1", "true", "yes", "on")
+REQUIRE_TRIGGER_RELEASE_BEFORE_DRIVE = os.getenv(
+    "REQUIRE_TRIGGER_RELEASE_BEFORE_DRIVE",
+    "1",
+).strip().lower() in ("1", "true", "yes", "on")
 
 SERVO_PIN = 18                # Servo GPIO
 MOTOR_IN1 = 17                # Motor Richtung
@@ -354,6 +358,10 @@ def print_axis_calibration(label: str, calibration):
     )
 
 
+def log_trigger_value(label: str, raw_value: int, normalized: float):
+    print(f"{label}: raw={raw_value} norm={normalized:.3f}")
+
+
 # =========================
 # CONTROLLER ERKENNUNG
 # =========================
@@ -486,7 +494,12 @@ def main():
 
         l2 = 0.0
         r2 = 0.0
+        l2_seen_released = not REQUIRE_TRIGGER_RELEASE_BEFORE_DRIVE
+        r2_seen_released = not REQUIRE_TRIGGER_RELEASE_BEFORE_DRIVE
+        drive_armed = not REQUIRE_TRIGGER_RELEASE_BEFORE_DRIVE
         pressed_keys = set()
+        if REQUIRE_TRIGGER_RELEASE_BEFORE_DRIVE:
+            print("Motor gesperrt: L2 und R2 einmal kurz antippen und loslassen.")
 
         try:
             # Event Loop für Controller
@@ -522,10 +535,23 @@ def main():
                 # Trigger links (Rückwärts)
                 elif event.code == ecodes.ABS_Z:
                     l2 = normalize_trigger(event.value, l2_calibration)
+                    log_trigger_value("L2", event.value, l2)
+                    if l2 <= DEADZONE_TRIGGER:
+                        l2_seen_released = True
 
                 # Trigger rechts (Vorwärts)
                 elif event.code == ecodes.ABS_RZ:
                     r2 = normalize_trigger(event.value, r2_calibration)
+                    log_trigger_value("R2", event.value, r2)
+                    if r2 <= DEADZONE_TRIGGER:
+                        r2_seen_released = True
+
+                if not drive_armed:
+                    set_motor(0.0)
+                    if l2_seen_released and r2_seen_released:
+                        drive_armed = True
+                        print("Motor freigegeben.")
+                    continue
 
                 # Geschwindigkeit berechnen
                 speed = r2 - l2
