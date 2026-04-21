@@ -270,6 +270,46 @@ body.fullscreen-active #fullscreen-exit-btn {
   display: block;
   background: #000;
 }
+
+body.mediamtx-fallback-active {
+  overflow: hidden;
+}
+
+#player-wrap.mediamtx-fallback {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  aspect-ratio: auto;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: #000;
+}
+
+#player-wrap.mediamtx-fallback #mediamtx-player {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+body.mediamtx-fallback-active header,
+body.mediamtx-fallback-active footer,
+body.mediamtx-fallback-active #stream-card > .status-bar {
+  display: none;
+}
+
+body.mediamtx-fallback-active #stream-card {
+  display: block !important;
+  max-width: none;
+  width: 100vw;
+}
 .status-bar {
   display: flex;
   justify-content: space-between;

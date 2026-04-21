@@ -106,16 +106,22 @@ function getMediaMtxPlayerUrl() {
 }
 
 function detachMediaMtxPlayer() {
+  const playerWrap = document.getElementById("player-wrap");
   if (mediaMtxFrame) {
     mediaMtxFrame.remove();
     mediaMtxFrame = null;
   }
+  if (playerWrap) playerWrap.classList.remove("mediamtx-fallback");
+  document.body.classList.remove("mediamtx-fallback-active");
   if (video) video.style.display = "";
 }
 
 function attachMediaMtxPlayerFallback() {
   const playerWrap = document.getElementById("player-wrap");
   if (!playerWrap) return false;
+
+  document.body.classList.add("mediamtx-fallback-active");
+  playerWrap.classList.add("mediamtx-fallback");
 
   if (video) {
     video.srcObject = null;
