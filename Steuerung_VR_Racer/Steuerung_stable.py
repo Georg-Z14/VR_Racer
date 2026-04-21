@@ -34,6 +34,7 @@ MAX_STEER_ANGLE = 25.0        # maximaler Lenkwinkel
 DEADZONE_STICK = 0.08         # Totzone für Analogstick
 DEADZONE_TRIGGER = 0.05       # Totzone für Trigger
 MOTOR_MAX_SPEED = float(os.getenv("MOTOR_MAX_SPEED", "0.65"))
+SERVO_MAX_OUTPUT = max(0.0, min(1.0, float(os.getenv("SERVO_MAX_OUTPUT", "0.25"))))
 STEERING_INVERTED = os.getenv("STEERING_INVERTED", "0").strip().lower() in ("1", "true", "yes", "on")
 DEBUG_CONTROLLER = os.getenv("DEBUG_CONTROLLER", "0").strip().lower() in ("1", "true", "yes", "on")
 
@@ -140,7 +141,7 @@ def set_servo(angle_deg: float):
 
     # Winkel begrenzen
     clamped = max(-MAX_STEER_ANGLE, min(MAX_STEER_ANGLE, angle_deg))
-    value = clamped / MAX_STEER_ANGLE
+    value = (clamped / MAX_STEER_ANGLE) * SERVO_MAX_OUTPUT
 
     # Wenn nahezu neutral -> Servo deaktivieren
     if abs(value) < 0.02:
