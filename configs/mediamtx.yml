@@ -1,0 +1,38 @@
+###############################################
+# VR_Racer MediaMTX low-latency camera profile
+#
+# WebRTC player URL:
+#   https://<pi-ip>:8889/cam
+#
+# WHEP URL for a custom JS player:
+#   https://<pi-ip>:8889/cam/whep
+
+webrtc: true
+webrtcAddress: :8889
+webrtcEncryption: true
+webrtcServerKey: /etc/mediamtx/certs/vrracer.key
+webrtcServerCert: /etc/mediamtx/certs/vrracer.crt
+webrtcAllowOrigins: ['*']
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: ''
+webrtcIPsFromInterfaces: true
+webrtcAdditionalHosts: []
+
+hls: false
+rtmp: false
+srt: false
+
+paths:
+  cam:
+    source: rpiCamera
+    rpiCameraCamID: 0
+    rpiCameraWidth: 640
+    rpiCameraHeight: 480
+    rpiCameraFPS: 30
+    rpiCameraCodec: auto
+    rpiCameraBitrate: 2000000
+    rpiCameraIDRPeriod: 30
+    rpiCameraHardwareH264Profile: baseline
+    rpiCameraSoftwareH264Profile: baseline
+    rpiCameraTextOverlayEnable: false
+    rpiCameraDenoise: "off"
