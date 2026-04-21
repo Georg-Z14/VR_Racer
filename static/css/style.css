@@ -4,6 +4,7 @@
   --bg-card: rgba(26, 26, 26, 0.7);
   --text-light: #e0e0e0;
   --gradient: linear-gradient(135deg, #00e0ff, #ff007a);
+  --mediamtx-fullscreen-y-offset: 4dvh;
 }
 
 /* ======================================================
@@ -320,6 +321,7 @@ body.mediamtx-fallback-active #stream-card {
   position: static;
   width: 100vw;
   height: 100dvh;
+  transform: translateY(var(--mediamtx-fullscreen-y-offset));
 }
 .status-bar {
   display: flex;

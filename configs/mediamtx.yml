@@ -26,11 +26,11 @@ paths:
   cam:
     source: rpiCamera
     rpiCameraCamID: 0
-    rpiCameraWidth: 960
-    rpiCameraHeight: 540
+    rpiCameraWidth: 1280
+    rpiCameraHeight: 720
     rpiCameraFPS: 30
     rpiCameraCodec: auto
-    rpiCameraBitrate: 2500000
+    rpiCameraBitrate: 4000000
     rpiCameraIDRPeriod: 30
     rpiCameraHardwareH264Profile: baseline
     rpiCameraSoftwareH264Profile: baseline
