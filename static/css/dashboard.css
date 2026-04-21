@@ -32,8 +32,13 @@ body {
 .logo {
   width: 60px;
   height: 60px;
+  box-sizing: border-box;
+  padding: 6px;
   border-radius: 50%;
   border: 2px solid var(--primary);
+  background: #020b14;
+  object-fit: contain;
+  object-position: center;
   box-shadow: 0 0 15px var(--primary);
 }
 
