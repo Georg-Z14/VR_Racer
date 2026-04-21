@@ -295,6 +295,8 @@ def build_axis_calibration(dev, code):
     """
     Kalibriert Analogsticks anhand der vom Kernel gemeldeten Achsdaten.
     PS5-Controller koennen je nach Treiber 0..255 oder -32768..32767 liefern.
+    Wichtig: Fuer Sticks darf nicht der aktuelle Startwert als Mitte genutzt
+    werden, weil der beim Verbinden kurz falsch sein kann.
     """
     info = get_abs_info(dev, code)
     if info is None:
@@ -306,8 +308,7 @@ def build_axis_calibration(dev, code):
 
     raw_min = info.min
     raw_max = info.max
-    fallback_center = raw_min + ((raw_max - raw_min) / 2)
-    center = info.value if raw_min <= info.value <= raw_max else fallback_center
+    center = raw_min + ((raw_max - raw_min) / 2)
 
     return {
         "min": raw_min,
