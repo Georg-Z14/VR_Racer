@@ -33,9 +33,9 @@ const XR_WIDTH_OVERRIDE = readXrNumberParam("xrWidth", null);
 const XR_FOV_OVERRIDE = readXrNumberParam("xrFov", null);
 const XR_VIDEO_TIMEOUT_MS = 7000;
 const XR_SCREEN_SCALE = Math.min(0.9, Math.max(0.2, readXrNumberParam("xrScale", 0.42)));
-const XR_FRAMEBUFFER_SCALE = Math.min(1.8, Math.max(1.0, readXrNumberParam("xrFramebufferScale", 1.25)));
+const XR_FRAMEBUFFER_SCALE = Math.min(1.8, Math.max(1.0, readXrNumberParam("xrFramebufferScale", 1.6)));
 const XR_PLANE_HEIGHT = Math.min(2.2, Math.max(0.0, readSignedXrNumberParam("xrPlaneHeight", 1.6)));
-const XR_CINEMA_SCALE = Math.min(1.6, Math.max(0.8, readXrNumberParam("xrCinemaScale", 1.2)));
+const XR_CINEMA_SCALE = Math.min(1.6, Math.max(0.8, readXrNumberParam("xrCinemaScale", 1.0)));
 const XR_CINEMA_Y_OFFSET = Math.min(0.5, Math.max(-0.5, readSignedXrNumberParam("xrCinemaYOffset", 0.08)));
 const DEFAULT_VR_EYE_ASPECT = 16 / 9;
 const XR_STEREO_EYE_ASPECT = readXrNumberParam("xrEyeAspect", DEFAULT_VR_EYE_ASPECT);
@@ -281,7 +281,7 @@ function getAdaptiveXrPlane(videoEl, stereoSbs = false) {
     ? window.innerWidth / window.innerHeight
     : videoAspect;
   const curvedMode = XR_RENDER_MODE !== "plane";
-  const baseDistance = XR_DISTANCE_OVERRIDE || (curvedMode ? 2.8 : Math.max(3.2, Math.min(5.0, 2.8 + (window.devicePixelRatio || 1) * 0.35)));
+  const baseDistance = XR_DISTANCE_OVERRIDE || (curvedMode ? 3.2 : Math.max(3.2, Math.min(5.0, 2.8 + (window.devicePixelRatio || 1) * 0.35)));
   const horizontalFovDeg = XR_FOV_OVERRIDE || (curvedMode ? 60 : 44);
   const fovWidth = 2 * baseDistance * Math.tan((horizontalFovDeg * Math.PI / 180) / 2);
   const baseWidth = XR_WIDTH_OVERRIDE || (curvedMode ? fovWidth : Math.max(1.8, Math.min(3.0, baseDistance * 0.72)));
