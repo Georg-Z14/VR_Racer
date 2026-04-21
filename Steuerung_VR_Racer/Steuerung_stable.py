@@ -35,10 +35,7 @@ DEADZONE_STICK = 0.08         # Totzone für Analogstick
 DEADZONE_TRIGGER = 0.05       # Totzone für Trigger
 MOTOR_MAX_SPEED = float(os.getenv("MOTOR_MAX_SPEED", "0.65"))
 STEERING_INVERTED = os.getenv("STEERING_INVERTED", "0").strip().lower() in ("1", "true", "yes", "on")
-REQUIRE_TRIGGER_RELEASE_BEFORE_DRIVE = os.getenv(
-    "REQUIRE_TRIGGER_RELEASE_BEFORE_DRIVE",
-    "1",
-).strip().lower() in ("1", "true", "yes", "on")
+DEBUG_CONTROLLER = os.getenv("DEBUG_CONTROLLER", "0").strip().lower() in ("1", "true", "yes", "on")
 
 SERVO_PIN = 18                # Servo GPIO
 MOTOR_IN1 = 17                # Motor Richtung
@@ -63,6 +60,10 @@ IGNORED_DEVICE_NAMES = (
     "keyboard",
     "touchpad",
     "touchscreen",
+    "motion",
+    "sensor",
+    "accelerometer",
+    "gyro",
 )
 
 DISCONNECT_BUTTON_COMBOS = tuple(
@@ -359,6 +360,8 @@ def print_axis_calibration(label: str, calibration):
 
 
 def log_trigger_value(label: str, raw_value: int, normalized: float):
+    if not DEBUG_CONTROLLER:
+        return
     print(f"{label}: raw={raw_value} norm={normalized:.3f}")
 
 
@@ -433,7 +436,14 @@ def find_controller():
 
     if CONTROLLER_DEVICE_PATH:
         try:
-            return InputDevice(CONTROLLER_DEVICE_PATH)
+            dev = InputDevice(CONTROLLER_DEVICE_PATH)
+            capabilities = dev.capabilities()
+            if is_controller_device(dev, capabilities):
+                return dev
+            print(
+                f"Controller-Pfad ignoriert, ist kein Gamepad: "
+                f"{dev.name} ({CONTROLLER_DEVICE_PATH})"
+            )
         except Exception:
             print(f"Controller-Pfad nicht verfügbar: {CONTROLLER_DEVICE_PATH}")
 
@@ -494,12 +504,7 @@ def main():
 
         l2 = 0.0
         r2 = 0.0
-        l2_seen_released = not REQUIRE_TRIGGER_RELEASE_BEFORE_DRIVE
-        r2_seen_released = not REQUIRE_TRIGGER_RELEASE_BEFORE_DRIVE
-        drive_armed = not REQUIRE_TRIGGER_RELEASE_BEFORE_DRIVE
         pressed_keys = set()
-        if REQUIRE_TRIGGER_RELEASE_BEFORE_DRIVE:
-            print("Motor gesperrt: L2 und R2 einmal kurz antippen und loslassen.")
 
         try:
             # Event Loop für Controller
@@ -536,22 +541,11 @@ def main():
                 elif event.code == ecodes.ABS_Z:
                     l2 = normalize_trigger(event.value, l2_calibration)
                     log_trigger_value("L2", event.value, l2)
-                    if l2 <= DEADZONE_TRIGGER:
-                        l2_seen_released = True
 
                 # Trigger rechts (Vorwärts)
                 elif event.code == ecodes.ABS_RZ:
                     r2 = normalize_trigger(event.value, r2_calibration)
                     log_trigger_value("R2", event.value, r2)
-                    if r2 <= DEADZONE_TRIGGER:
-                        r2_seen_released = True
-
-                if not drive_armed:
-                    set_motor(0.0)
-                    if l2_seen_released and r2_seen_released:
-                        drive_armed = True
-                        print("Motor freigegeben.")
-                    continue
 
                 # Geschwindigkeit berechnen
                 speed = r2 - l2
