@@ -34,6 +34,7 @@ MAX_STEER_ANGLE = 25.0        # maximaler Lenkwinkel
 DEADZONE_STICK = 0.08         # Totzone für Analogstick
 DEADZONE_TRIGGER = 0.05       # Totzone für Trigger
 MOTOR_MAX_SPEED = float(os.getenv("MOTOR_MAX_SPEED", "0.65"))
+STEERING_INVERTED = os.getenv("STEERING_INVERTED", "0").strip().lower() in ("1", "true", "yes", "on")
 
 SERVO_PIN = 18                # Servo GPIO
 MOTOR_IN1 = 17                # Motor Richtung
@@ -243,7 +244,7 @@ def disconnect_controller(dev):
 
 
 # =========================
-# TRIGGER KALIBRIERUNG
+# ACHSEN / TRIGGER KALIBRIERUNG
 # =========================
 
 def clamp(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
@@ -285,6 +286,42 @@ def build_trigger_calibration(dev, code):
     }
 
 
+def build_axis_calibration(dev, code):
+    """
+    Kalibriert Analogsticks anhand der vom Kernel gemeldeten Achsdaten.
+    PS5-Controller koennen je nach Treiber 0..255 oder -32768..32767 liefern.
+    """
+    info = get_abs_info(dev, code)
+    if info is None:
+        return {
+            "min": 0,
+            "max": 255,
+            "center": 128,
+        }
+
+    raw_min = info.min
+    raw_max = info.max
+    fallback_center = raw_min + ((raw_max - raw_min) / 2)
+    center = info.value if raw_min <= info.value <= raw_max else fallback_center
+
+    return {
+        "min": raw_min,
+        "max": raw_max,
+        "center": center,
+    }
+
+
+def normalize_axis(raw_value: int, calibration) -> float:
+    center = calibration["center"]
+
+    if raw_value >= center:
+        span = max(1, calibration["max"] - center)
+        return clamp((raw_value - center) / span, -1.0, 1.0)
+
+    span = max(1, center - calibration["min"])
+    return clamp((raw_value - center) / span, -1.0, 1.0)
+
+
 def normalize_trigger(raw_value: int, calibration) -> float:
     raw_min = calibration["min"]
     raw_max = calibration["max"]
@@ -305,6 +342,15 @@ def print_trigger_calibration(label: str, calibration):
         f"neutral={calibration['neutral']} "
         f"max={calibration['max']} "
         f"richtung={direction}"
+    )
+
+
+def print_axis_calibration(label: str, calibration):
+    print(
+        f"{label}: min={calibration['min']} "
+        f"center={calibration['center']} "
+        f"max={calibration['max']} "
+        f"invertiert={STEERING_INVERTED}"
     )
 
 
@@ -431,15 +477,15 @@ def main():
 
         print(f"Verbunden mit: {gamepad.name}")
 
+        steering_calibration = build_axis_calibration(gamepad, ecodes.ABS_X)
         l2_calibration = build_trigger_calibration(gamepad, ecodes.ABS_Z)
         r2_calibration = build_trigger_calibration(gamepad, ecodes.ABS_RZ)
+        print_axis_calibration("Lenkung ABS_X", steering_calibration)
         print_trigger_calibration("L2", l2_calibration)
         print_trigger_calibration("R2", r2_calibration)
-        print("Motor bleibt gesperrt, bis L2/R2 losgelassen sind.")
 
         l2 = 0.0
         r2 = 0.0
-        motor_armed = False
         pressed_keys = set()
 
         try:
@@ -464,7 +510,9 @@ def main():
 
                 # Linker Stick (Lenkung)
                 if event.code == ecodes.ABS_X:
-                    norm = (event.value - 128) / 128.0
+                    norm = normalize_axis(event.value, steering_calibration)
+                    if STEERING_INVERTED:
+                        norm = -norm
 
                     if abs(norm) < DEADZONE_STICK:
                         norm = 0.0
@@ -478,14 +526,6 @@ def main():
                 # Trigger rechts (Vorwärts)
                 elif event.code == ecodes.ABS_RZ:
                     r2 = normalize_trigger(event.value, r2_calibration)
-
-                if not motor_armed:
-                    if l2 <= DEADZONE_TRIGGER and r2 <= DEADZONE_TRIGGER:
-                        motor_armed = True
-                        print("Motor freigegeben.")
-                    else:
-                        set_motor(0.0)
-                        continue
 
                 # Geschwindigkeit berechnen
                 speed = r2 - l2
