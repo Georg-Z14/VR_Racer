@@ -1,0 +1,4 @@
+-r base.txt
+evdev
+gpiozero
+lgpio

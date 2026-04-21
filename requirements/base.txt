@@ -1,0 +1,8 @@
+aiohttp
+aiortc
+av
+cryptography
+python-dotenv
+PyJWT
+opencv-python-headless
+numpy
