@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 
 from evdev import InputDevice, ecodes, list_devices
@@ -34,6 +35,9 @@ MAX_STEER_ANGLE = 25.0        # maximaler Lenkwinkel
 DEADZONE_STICK = 0.08         # Totzone für Analogstick
 DEADZONE_TRIGGER = 0.05       # Totzone für Trigger
 MOTOR_MAX_SPEED = float(os.getenv("MOTOR_MAX_SPEED", "0.25"))
+MOTOR_RAMP_STEP = max(0.001, float(os.getenv("MOTOR_RAMP_STEP", "0.02")))
+MOTOR_RAMP_INTERVAL = max(0.001, float(os.getenv("MOTOR_RAMP_INTERVAL", "0.01")))
+MOTOR_DIRECTION_DEADTIME = max(0.0, float(os.getenv("MOTOR_DIRECTION_DEADTIME", "0.05")))
 SERVO_MAX_OUTPUT = max(0.0, min(1.0, float(os.getenv("SERVO_MAX_OUTPUT", "0.25"))))
 SERVO_DETACH_ON_NEUTRAL = os.getenv("SERVO_DETACH_ON_NEUTRAL", "0").strip().lower() in ("1", "true", "yes", "on")
 SERVO_UPDATE_EPSILON = float(os.getenv("SERVO_UPDATE_EPSILON", "0.005"))
@@ -124,6 +128,20 @@ ENA = PWMOutputDevice(MOTOR_ENA, pin_factory=factory, frequency=PWM_FREQUENCY)
 # =========================
 
 last_servo_value = 0.0
+motor_target_speed = 0.0
+motor_current_speed = 0.0
+motor_last_direction = 0
+motor_deadtime_until = 0.0
+motor_lock = threading.Lock()
+motor_stop_event = threading.Event()
+
+
+def speed_to_direction(speed: float) -> int:
+    if speed > 0:
+        return 1
+    if speed < 0:
+        return -1
+    return 0
 
 
 # =========================
@@ -177,16 +195,11 @@ def set_servo(angle_deg: float):
 # MOTOR STEUERUNG
 # =========================
 
-def set_motor(speed: float):
+def apply_motor(speed: float):
     """
-    Setzt die Geschwindigkeit und Richtung des Motors.
-    - positive Werte: vorwärts
-    - negative Werte: rückwärts
-    - 0: Stop
+    Schreibt den bereits begrenzten Geschwindigkeitswert direkt auf den Treiber.
+    Diese Funktion enthält keine Ramp- oder Sicherheitslogik.
     """
-
-    speed = max(-MOTOR_MAX_SPEED, min(MOTOR_MAX_SPEED, speed))
-
     if speed > 0:
         IN1.on()
         IN2.off()
@@ -203,6 +216,61 @@ def set_motor(speed: float):
         ENA.value = 0.0
 
 
+def motor_worker():
+    global motor_current_speed, motor_last_direction, motor_deadtime_until
+
+    while not motor_stop_event.is_set():
+        now = time.monotonic()
+
+        with motor_lock:
+            target_speed = motor_target_speed
+
+        target_direction = speed_to_direction(target_speed)
+        current_direction = speed_to_direction(motor_current_speed)
+
+        if (
+            target_direction != 0 and
+            current_direction != 0 and
+            target_direction != current_direction
+        ):
+            motor_current_speed = 0.0
+            apply_motor(0.0)
+            motor_last_direction = 0
+            motor_deadtime_until = now + MOTOR_DIRECTION_DEADTIME
+            time.sleep(MOTOR_RAMP_INTERVAL)
+            continue
+
+        if now < motor_deadtime_until:
+            apply_motor(0.0)
+            time.sleep(MOTOR_RAMP_INTERVAL)
+            continue
+
+        if abs(target_speed - motor_current_speed) > MOTOR_RAMP_STEP:
+            motor_current_speed += MOTOR_RAMP_STEP if target_speed > motor_current_speed else -MOTOR_RAMP_STEP
+        else:
+            motor_current_speed = target_speed
+
+        apply_motor(motor_current_speed)
+        motor_last_direction = speed_to_direction(motor_current_speed)
+        time.sleep(MOTOR_RAMP_INTERVAL)
+
+
+motor_thread = threading.Thread(target=motor_worker, name="motor-worker", daemon=True)
+motor_thread.start()
+
+
+def set_motor(speed: float):
+    """
+    Setzt die Zielgeschwindigkeit. Die eigentliche Ausgabe auf den
+    Motortreiber übernimmt der Worker mit Soft-Ramp und Dead-Time.
+    """
+    global motor_target_speed
+
+    speed = max(-MOTOR_MAX_SPEED, min(MOTOR_MAX_SPEED, speed))
+    with motor_lock:
+        motor_target_speed = speed
+
+
 # =========================
 # NOT-STOP
 # =========================
@@ -213,8 +281,14 @@ def emergency_stop():
     - Motor
     - Servo (deaktiviert)
     """
-    set_motor(0.0)
-    servo.detach()
+    global motor_target_speed, motor_current_speed, motor_last_direction, motor_deadtime_until
+    with motor_lock:
+        motor_target_speed = 0.0
+    motor_current_speed = 0.0
+    motor_last_direction = 0
+    motor_deadtime_until = 0.0
+    apply_motor(0.0)
+    set_servo(0.0)
 
 
 # =========================
@@ -587,4 +661,8 @@ def main():
 # =========================
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        motor_stop_event.set()
+        apply_motor(0.0)
