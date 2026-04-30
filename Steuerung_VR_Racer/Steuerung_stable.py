@@ -347,8 +347,8 @@ def get_abs_info(dev, code):
 def build_trigger_calibration(dev, code):
     """
     Manche Controller melden Trigger losgelassen als 0, andere als 255.
-    Wir verwenden den Wert beim Verbinden als Neutralpunkt und berechnen
-    daraus die richtige Richtung.
+    Wir wählen den näheren Endpunkt als Neutralstellung, damit ein verrauschter
+    Startwert nicht sofort als Gas interpretiert wird.
     """
     info = get_abs_info(dev, code)
     if info is None:
@@ -361,14 +361,16 @@ def build_trigger_calibration(dev, code):
 
     raw_min = info.min
     raw_max = info.max
-    neutral = info.value
-    mid = raw_min + ((raw_max - raw_min) / 2)
+    current = info.value
+    distance_to_min = abs(current - raw_min)
+    distance_to_max = abs(raw_max - current)
+    neutral = raw_min if distance_to_min <= distance_to_max else raw_max
 
     return {
         "min": raw_min,
         "max": raw_max,
         "neutral": neutral,
-        "inverted": neutral >= mid,
+        "inverted": neutral == raw_max,
     }
 
 
@@ -584,9 +586,16 @@ def main():
         print_trigger_calibration("L2", l2_calibration)
         print_trigger_calibration("R2", r2_calibration)
 
-        l2 = 0.0
-        r2 = 0.0
+        l2_info = get_abs_info(gamepad, ecodes.ABS_Z)
+        r2_info = get_abs_info(gamepad, ecodes.ABS_RZ)
+        l2 = normalize_trigger(l2_info.value if l2_info else 0, l2_calibration)
+        r2 = normalize_trigger(r2_info.value if r2_info else 0, r2_calibration)
+        l2_seen_released = l2 <= DEADZONE_TRIGGER
+        r2_seen_released = r2 <= DEADZONE_TRIGGER
+        drive_armed = l2_seen_released and r2_seen_released
         pressed_keys = set()
+        if not drive_armed:
+            print("Motor gesperrt bis L2 und R2 neutral erkannt wurden.")
 
         try:
             # Event Loop für Controller
@@ -623,11 +632,22 @@ def main():
                 elif event.code == ecodes.ABS_Z:
                     l2 = normalize_trigger(event.value, l2_calibration)
                     log_trigger_value("L2", event.value, l2)
+                    if l2 <= DEADZONE_TRIGGER:
+                        l2_seen_released = True
 
                 # Trigger rechts (Vorwärts)
                 elif event.code == ecodes.ABS_RZ:
                     r2 = normalize_trigger(event.value, r2_calibration)
                     log_trigger_value("R2", event.value, r2)
+                    if r2 <= DEADZONE_TRIGGER:
+                        r2_seen_released = True
+
+                if not drive_armed:
+                    set_motor(0.0)
+                    if l2_seen_released and r2_seen_released:
+                        drive_armed = True
+                        print("Motor freigegeben.")
+                    continue
 
                 # Geschwindigkeit berechnen
                 speed = r2 - l2
