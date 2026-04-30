@@ -31,7 +31,7 @@ if hasattr(sys.stdout, "reconfigure"):
 # KONSTANTEN / EINSTELLUNGEN
 # =========================
 
-MAX_STEER_ANGLE = 25.0        # maximaler Lenkwinkel
+MAX_STEER_ANGLE = float(os.getenv("MAX_STEER_ANGLE", "25.0"))  # maximaler Lenkwinkel
 DEADZONE_STICK = 0.08         # Totzone für Analogstick
 DEADZONE_TRIGGER = 0.05       # Totzone für Trigger
 MOTOR_MAX_SPEED = float(os.getenv("MOTOR_MAX_SPEED", "0.25"))
@@ -39,6 +39,9 @@ MOTOR_RAMP_STEP = max(0.001, float(os.getenv("MOTOR_RAMP_STEP", "0.02")))
 MOTOR_RAMP_INTERVAL = max(0.001, float(os.getenv("MOTOR_RAMP_INTERVAL", "0.01")))
 MOTOR_DIRECTION_DEADTIME = max(0.0, float(os.getenv("MOTOR_DIRECTION_DEADTIME", "0.05")))
 SERVO_MAX_OUTPUT = max(0.0, min(1.0, float(os.getenv("SERVO_MAX_OUTPUT", "0.25"))))
+SERVO_LEFT_OUTPUT = max(0.0, min(1.0, float(os.getenv("SERVO_LEFT_OUTPUT", str(SERVO_MAX_OUTPUT)))))
+SERVO_RIGHT_OUTPUT = max(0.0, min(1.0, float(os.getenv("SERVO_RIGHT_OUTPUT", str(SERVO_MAX_OUTPUT)))))
+SERVO_CENTER_TRIM = max(-0.35, min(0.35, float(os.getenv("SERVO_CENTER_TRIM", "0.0"))))
 SERVO_DETACH_ON_NEUTRAL = os.getenv("SERVO_DETACH_ON_NEUTRAL", "0").strip().lower() in ("1", "true", "yes", "on")
 SERVO_UPDATE_EPSILON = float(os.getenv("SERVO_UPDATE_EPSILON", "0.005"))
 STEERING_INVERTED = os.getenv("STEERING_INVERTED", "0").strip().lower() in ("1", "true", "yes", "on")
@@ -161,16 +164,26 @@ def set_servo(angle_deg: float):
 
     # Winkel begrenzen
     clamped = max(-MAX_STEER_ANGLE, min(MAX_STEER_ANGLE, angle_deg))
-    value = (clamped / MAX_STEER_ANGLE) * SERVO_MAX_OUTPUT
+    normalized = clamped / MAX_STEER_ANGLE if MAX_STEER_ANGLE else 0.0
+    center_value = SERVO_CENTER_TRIM
+
+    if normalized < 0:
+        value = center_value + (normalized * SERVO_LEFT_OUTPUT)
+    elif normalized > 0:
+        value = center_value + (normalized * SERVO_RIGHT_OUTPUT)
+    else:
+        value = center_value
+
+    value = max(-1.0, min(1.0, value))
 
     # Neutral aktiv halten. detach() kann bei RC-Lenkservos dazu fuehren,
     # dass die Lenkung nach einiger Zeit nicht mehr zuverlaessig anspricht.
-    if abs(value) < 0.02:
+    if abs(value - center_value) < 0.02:
         if SERVO_DETACH_ON_NEUTRAL:
             servo.detach()
         else:
-            servo.value = 0.0
-        last_servo_value = 0.0
+            servo.value = center_value
+        last_servo_value = center_value
         return
 
     # Nur aktualisieren, wenn sich der Wert merklich geändert hat

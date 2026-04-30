@@ -1,51 +1,159 @@
-# VR_Racer
+# VR Racer Setup Anleitung
 
-## Zielstruktur
+Stand: 28.04.2026
 
-```text
-VR_Racer/
-├── app/
-│   ├── camera_stream.py
-│   └── server.py
-├── configs/
-│   └── mediamtx.yml
-├── data/
-│   ├── secret.key
-│   └── users.db
-├── requirements/
-│   ├── base.txt
-│   └── pi.txt
-├── run_secure_cached.sh
-├── server.py              # Start-Wrapper fuer app/server.py
-├── scripts/
-│   ├── generate_local_https_cert.sh
-│   ├── install_autostart.sh
-│   ├── install_mediamtx.sh
-│   ├── start_controller.sh
-│   └── start_server.sh
-├── Steuerung_VR_Racer/
-│   └── Steuerung_stable.py
-├── static/
-│   ├── css/
-│   ├── js/
-│   └── media/
-├── templates/
-└── README.md
+Diese Anleitung beschreibt, wie das `VR_Racer` Projekt auf einem Raspberry Pi 5 frisch eingerichtet, gestartet und mit Apple Vision Pro sowie einem PS5/DualSense Controller genutzt wird.
+
+## .env Settings
+
+```env
+JWT_SECRET=super_secret_key
+JWT_EXPIRE_MINUTES=5
+ADMIN_G_PASS=Hallo123!
+ADMIN_D_PASS=Pass123!
+
+PORT=8443
+HTTPS_ENABLED=1
+HTTPS_CERT_FILE=certs/vrracer.crt
+HTTPS_KEY_FILE=certs/vrracer.key
+DB_PATH=data/users.db
+KEY_FILE=data/secret.key
+
+STREAM_BACKEND=mediamtx
+MEDIAMTX_WEBRTC_URL=
+CONTROLLER_DEVICE_PATH=
+MOTOR_MAX_SPEED=0.65
+SERVO_MAX_OUTPUT=0.25
+SERVO_DETACH_ON_NEUTRAL=0
+SERVO_UPDATE_EPSILON=0.005
+STEERING_INVERTED=0
+DEBUG_CONTROLLER=0
 ```
 
-Lokale Dateien wie `.env`, `data/users.db`, `data/secret.key` und `venv/` bleiben auf dem Raspberry Pi, werden aber nicht ins Git-Repo committed.
-Als Vorlage fuer neue Installationen dient `.env.example`.
+## Mediamtx.yml Settings
 
-## Raspberry Pi Setup
+```yaml
+###############################################
+# VR_Racer MediaMTX low-latency camera profile
+#
+# WebRTC player URL:
+#
+#   https://<pi-ip>:8889/cam
+#
+# WHEP URL for a custom JS player:
+#
+#   https://<pi-ip>:8889/cam/whep
 
-Systempakete:
+webrtc: true
+webrtcAddress: :8889
+webrtcEncryption: true
+webrtcServerKey: /etc/mediamtx/certs/vrracer.key
+webrtcServerCert: /etc/mediamtx/certs/vrracer.crt
+webrtcAllowOrigins: ['*']
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: ''
+webrtcIPsFromInterfaces: true
+webrtcAdditionalHosts: []
+
+hls: false
+rtmp: false
+srt: false
+
+paths:
+  cam:
+    source: rpiCamera
+    rpiCameraCamID: 0
+    rpiCameraWidth: 1280
+    rpiCameraHeight: 720
+    rpiCameraFPS: 30
+    rpiCameraCodec: auto
+    rpiCameraBitrate: 4000000
+    rpiCameraIDRPeriod: 30
+    rpiCameraHardwareH264Profile: baseline
+    rpiCameraSoftwareH264Profile: baseline
+    rpiCameraTextOverlayEnable: false
+    rpiCameraDenoise: "off"
+```
+
+## 1. Zielbild
+
+- Der Raspberry Pi 5 hostet die Webseite lokal per HTTPS.
+- MediaMTX liefert den Kamera-Stream per WebRTC unter `https://vrracer.local:8889/cam`.
+- Die `VR_Racer` Webseite läuft unter `https://vrracer.local:8443`.
+- Die Python-App ist für Login, UI und Controller-Start zuständig.
+- Es wird genau eine Kamera genutzt.
+- Cloudflare Tunnel wird nicht benötigt.
+
+## 2. Voraussetzungen
+
+- Raspberry Pi 5 mit Raspberry Pi OS.
+- Kamera am Pi angeschlossen.
+- SSH-Zugriff auf den Pi.
+- Privates GitHub-Repo mit dem Projekt.
+- Apple Vision Pro im gleichen lokalen Netzwerk wie der Pi.
+- PS5/DualSense Controller.
+
+## 3. Projekt auf dem Mac vorbereiten (optional)
+
+Im Projektordner auf dem Mac:
+
+```bash
+cd /Users/georgzinn/PycharmProjects/VR_Racer
+git status
+```
+
+Änderungen committen und auf GitHub pushen:
+
+```bash
+git add .
+git commit -m "Update VR Racer setup"
+git push
+```
+
+Wichtig: Wenn Dateien wie `venv/`, `__pycache__/`, `.DS_Store` oder lokale Datenbanken auftauchen, diese nicht mit hochladen.
+
+```bash
+git add app configs requirements scripts static templates Steuerung_VR_Racer server.py run_secure_cached.sh .env
+git commit -m "Update VR Racer"
+git push
+```
+
+## 4. Raspberry Pi komplett frisch einrichten
+
+Per SSH auf den Pi verbinden:
+
+```bash
+ssh vrracersbs@vrracer.local
+```
+
+Falls `vrracer.local` nicht geht, die IP nutzen:
+
+```bash
+ssh vrracersbs@<pi-ip>
+```
+
+### 4.1 System aktualisieren und Pakete installieren
 
 ```bash
 sudo apt update
-sudo apt install -y git python3-venv python3-pip python3-dev python3-picamera2 bluetooth bluez swig
+sudo apt upgrade -y
+sudo apt install -y git curl tar openssl python3-venv python3-pip python3-dev python3-picamera2 bluetooth bluez swig
 ```
 
-Projektumgebung:
+### 4.2 Altes Projekt entfernen und neu clonen
+
+Nur verwenden, wenn wirklich komplett neu installiert werden soll:
+
+```bash
+cd ~
+rm -rf VR_Racer
+git clone https://github.com/georg-Z14/VR_Racer.git
+cd ~/VR_Racer
+```
+
+Wenn GitHub nach einem Passwort fragt: GitHub akzeptiert kein normales Account-Passwort mehr. Dann einen GitHub Personal Access Token als Passwort verwenden.
+
+### 4.3 Python venv erstellen
 
 ```bash
 cd ~/VR_Racer
@@ -53,192 +161,208 @@ python3 -m venv --system-site-packages venv
 source venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements/pi.txt
-cp .env.example .env
-chmod +x run_secure_cached.sh
 ```
 
-`--system-site-packages` ist wichtig, damit die virtuelle Umgebung `picamera2` aus Raspberry Pi OS sehen kann.
+`--system-site-packages` ist wichtig, damit die venv die Raspberry-Pi-Systempakete wie `picamera2` sehen kann.
 
-Auf dem Mac fuer PyCharm nur die plattformneutralen Pakete installieren:
+### 4.4 Feste IP direkt auf dem Pi setzen (ohne DHCP-Reservierung im Router)
+
+Wenn die IP nicht vom Router reserviert werden soll, kann die statische IP direkt auf dem Pi konfiguriert werden. Das ist genau dann sinnvoll, wenn der Pi immer dieselbe lokale IP haben soll, auch ohne DHCP-Reservierung im Router.
+
+Erst die vorhandenen Verbindungen anzeigen:
 
 ```bash
-pip install -r requirements/base.txt
+nmcli con show
 ```
 
-## Lokales HTTPS ohne Cloudflare
+Beispiel: WLAN-Verbindung heißt `WLAN-RFYKV8` und soll auf `192.168.2.50` fest gesetzt werden.
 
-Fuer Apple Vision Pro/WebXR wird HTTPS benoetigt. Fuer niedrige Latenz sollte der Fahrbetrieb aber lokal im WLAN laufen, nicht ueber Cloudflare Tunnel.
+```bash
+sudo nmcli con mod "WLAN-RFYKV8" ipv4.addresses 192.168.2.50/24
+sudo nmcli con mod "WLAN-RFYKV8" ipv4.gateway 192.168.2.1
+sudo nmcli con mod "WLAN-RFYKV8" ipv4.dns "192.168.2.1 1.1.1.1"
+sudo nmcli con mod "WLAN-RFYKV8" ipv4.method manual
+```
+
+Danach die Verbindung neu aufbauen:
+
+```bash
+sudo nmcli con down "WLAN-RFYKV8"
+sudo nmcli con up "WLAN-RFYKV8"
+```
+
+Wichtig: Wenn du per SSH verbunden bist, bricht die Sitzung beim Umschalten des WLAN meist kurz ab. Das ist normal. Danach musst du dich mit der neuen festen IP wieder neu verbinden.
+
+Neue Verbindung testen:
+
+```bash
+ssh vrracersbs@192.168.2.50
+hostname -I
+```
+
+Wenn die Ausgabe `192.168.2.50` enthält, ist die feste IP aktiv.
+
+Alternative: Falls lieber der grafische Raspberry-Pi-Weg genutzt wird, kann die statische IP auch über die Netzwerkeinstellungen auf dem Pi selbst gesetzt werden. Inhaltlich ist das dasselbe wie die `nmcli`-Befehle oben.
+
+Wichtig für Zertifikate:
+
+- Wenn du das Zertifikat nach dem Setzen der festen IP neu erzeugst, wird diese feste IP ebenfalls in das Zertifikat aufgenommen.
+- Die robustere Variante bleibt trotzdem `https://vrracer.local:8443`, weil der Hostname unabhängig von der IP ist.
+- Wenn ihr die feste IP direkt im Browser nutzen wollt, sollte nach der IP-Änderung das Zertifikat einmal neu erzeugt werden.
+
+## 5. .env konfigurieren
+
+Die Datei liegt im Projektroot:
 
 ```bash
 cd ~/VR_Racer
+nano .env
+```
+
+Empfohlener Inhalt:
+
+```env
+JWT_SECRET=super_secret_key
+JWT_EXPIRE_MINUTES=5
+ADMIN_G_PASS=Hallo123!
+ADMIN_D_PASS=Pass123!
+
+PORT=8443
+HTTPS_ENABLED=1
+HTTPS_CERT_FILE=certs/vrracer.crt
+HTTPS_KEY_FILE=certs/vrracer.key
+DB_PATH=data/users.db
+KEY_FILE=data/secret.key
+
+STREAM_BACKEND=mediamtx
+MEDIAMTX_WEBRTC_URL=
+CONTROLLER_DEVICE_PATH=
+MOTOR_MAX_SPEED=0.65
+SERVO_MAX_OUTPUT=0.25
+SERVO_DETACH_ON_NEUTRAL=0
+SERVO_UPDATE_EPSILON=0.005
+STEERING_INVERTED=0
+DEBUG_CONTROLLER=0
+```
+
+### 5.1 Bedeutung der wichtigen .env Werte
+
+- `PORT=8443`: HTTPS-Port der Webseite.
+- `HTTPS_ENABLED=1`: Webseite startet mit HTTPS.
+- `STREAM_BACKEND=mediamtx`: Kamera kommt über MediaMTX.
+- `MEDIAMTX_WEBRTC_URL=`: leer lassen. Dann nutzt der Browser automatisch denselben Host wie die Webseite.
+- `CONTROLLER_DEVICE_PATH=`: leer lassen. Der Code sucht automatisch das richtige DualSense-Gamepad. Nicht fest auf `/dev/input/event13` setzen.
+- `MOTOR_MAX_SPEED=0.65`: begrenzt die Maximalgeschwindigkeit auf 65 Prozent.
+- `SERVO_MAX_OUTPUT=0.25`: begrenzt den Servo-Lenkausschlag auf 25 Prozent pro Richtung.
+- `SERVO_DETACH_ON_NEUTRAL=0`: Servo bleibt in Neutralstellung aktiv auf Mitte, damit die Lenkung nicht nach einiger Zeit aussetzt.
+- `SERVO_UPDATE_EPSILON=0.005`: kleinere Lenkeingaben werden sauberer erkannt.
+- `STEERING_INVERTED=0`: falls links/rechts vertauscht ist, auf `1` setzen.
+- `DEBUG_CONTROLLER=0`: auf `1` setzen, wenn Rohwerte des Controllers geloggt werden sollen.
+
+Nach Änderungen an `.env`:
+
+```bash
+sudo systemctl restart vr-racer-server.service
+sudo systemctl restart vr-racer-controller.service
+```
+
+## 6. HTTPS Zertifikat erstellen
+
+```bash
+cd ~/VR_Racer
+chmod +x scripts/*.sh
 ./scripts/generate_local_https_cert.sh
 ```
 
-Das erzeugt:
+Erzeugte Dateien:
 
 ```text
 certs/vrracer.crt
 certs/vrracer.key
 ```
 
-Die `.env` nutzt danach standardmaessig:
+### 6.1 Zertifikat auf den Mac kopieren
+
+Wichtig: `scp` muss auf dem Mac ausgeführt werden, nicht innerhalb der SSH-Sitzung auf dem Pi.
 
 ```bash
-PORT=8443
-HTTPS_ENABLED=1
-HTTPS_CERT_FILE=certs/vrracer.crt
-HTTPS_KEY_FILE=certs/vrracer.key
+scp vrracersbs@vrracer.local:~/VR_Racer/certs/vrracer.crt ~/Downloads/vrracer.crt
 ```
 
-Server starten:
+Falls `vrracer.local` nicht geht:
 
 ```bash
-./run_secure_cached.sh
+scp vrracersbs@<pi-ip>:~/VR_Racer/certs/vrracer.crt ~/Downloads/vrracer.crt
 ```
 
-Aufrufen:
+### 6.2 Zertifikat auf der Vision Pro vertrauen
 
-```text
-https://<pi-ip>:8443
-```
+1. `vrracer.crt` vom Mac auf die Vision Pro bringen, z. B. per iCloud Drive, AirDrop oder Dateien-App.
+2. Auf der Vision Pro die Datei `vrracer.crt` öffnen und Profil installieren.
+3. In den Einstellungen das installierte Zertifikat als vertrauenswürdig aktivieren.
+4. Danach Safari komplett schließen und neu öffnen.
 
-Wichtig: Das Zertifikat `certs/vrracer.crt` muss auf der Vision Pro als vertrauenswuerdig installiert werden. Sonst blockiert Safari/WebXR weiterhin oder zeigt Zertifikatswarnungen.
+Wenn sich die IP des Pi ändert, funktioniert `vrracer.local` weiter, solange `mDNS` im Netzwerk funktioniert. Falls ihr direkt die IP nutzt und die IP ändert sich, muss das Zertifikat neu erzeugt und neu auf der Vision Pro vertraut werden.
 
-## Apple Vision Pro / Kinoansicht
-
-Die aktuelle Vision-Pro-Ansicht nutzt eine Mono-/Kinoansicht mit genau einer Kamera. Der Kamera-Stream kommt ausschliesslich von MediaMTX.
-
-Die Kamera wird nicht mehr in `.env` konfiguriert, sondern in `configs/mediamtx.yml`:
-
-```bash
-rpiCameraCamID: 0
-rpiCameraWidth: 640
-rpiCameraHeight: 480
-rpiCameraFPS: 30
-rpiCameraBitrate: 2000000
-```
-
-Wenn FPS und Latenz stabil bleiben, kann danach `rpiCameraWidth: 960`, `rpiCameraHeight: 540` und `rpiCameraBitrate: 2500000` getestet werden. `1280x720` sollte erst getestet werden, wenn die niedrigeren Profile konstant fluessig laufen. Falls das Bild zu nah wirkt, kann die Vision-Pro-URL testweise mit `?xrDistance=2.8&xrFov=85` geoeffnet werden.
-
-## MediaMTX Stream
-
-MediaMTX stellt den Kamera-Stream direkt als WebRTC/WHEP bereit. Die Python-App bleibt fuer Login, UI, Steuerung und Vision-Pro/Kinoansicht zustaendig, oeffnet die Kamera aber nicht mehr selbst.
-
-Installation auf dem Raspberry Pi:
+## 7. MediaMTX installieren
 
 ```bash
 cd ~/VR_Racer
-chmod +x scripts/install_mediamtx.sh
 ./scripts/install_mediamtx.sh
 sudo systemctl start mediamtx.service
 ```
 
-Logs pruefen:
+Status prüfen:
+
+```bash
+systemctl status mediamtx.service
+```
+
+Logs live anzeigen:
 
 ```bash
 journalctl -u mediamtx.service -f
 ```
 
-Direkter MediaMTX-Test im Browser:
+Direkter Kamera-Test:
 
 ```text
-https://<pi-ip>:8889/cam
+https://vrracer.local:8889/cam
 ```
 
-Die VR_Racer-App nutzt standardmaessig MediaMTX:
+### 7.1 Kamera-Auflösung ändern
 
-```bash
-STREAM_BACKEND=mediamtx
-MEDIAMTX_WEBRTC_URL=
-```
-
-Wenn `MEDIAMTX_WEBRTC_URL` leer bleibt, nutzt der Browser automatisch denselben Host wie die App:
+Die Kamera wird in dieser Datei konfiguriert:
 
 ```text
-https://<pi-ip>:8889/cam/whep
+configs/mediamtx.yml
 ```
 
-Nach Aenderungen an `.env` den Python-Server neu starten:
+Aktuelles Profil:
 
-```bash
-sudo systemctl restart vr-racer-server.service
+```yaml
+rpiCameraCamID: 0
+rpiCameraWidth: 1280
+rpiCameraHeight: 720
+rpiCameraFPS: 30
+rpiCameraBitrate: 4000000
 ```
 
-## PS5 Controller
-
-Die Steuerung braucht diese Raspberry-Pi-Pakete aus `requirements/pi.txt`:
-
-- `evdev` fuer `/dev/input/event*`
-- `gpiozero` fuer GPIO-Ausgabe
-- `lgpio` als GPIO-Pin-Factory auf dem Raspberry Pi
-
-Start:
+Nach Änderungen an `configs/mediamtx.yml`:
 
 ```bash
 cd ~/VR_Racer
-source venv/bin/activate
-python3 Steuerung_VR_Racer/Steuerung_stable.py
+sudo cp configs/mediamtx.yml /etc/mediamtx/mediamtx.yml
+sudo systemctl restart mediamtx.service
 ```
 
-Falls der Benutzer keine Rechte auf Controller/GPIO hat:
+## 8. Autostart installieren
 
-```bash
-sudo usermod -aG input,gpio vrracersbs
-```
+Der Autostart legt drei Services an:
 
-Danach abmelden und neu per SSH einloggen.
-
-Controller einmalig koppeln und vertrauen:
-
-```bash
-bluetoothctl
-power on
-agent on
-default-agent
-scan on
-```
-
-Den PS5-Controller in Pairing-Modus setzen: PS-Taste und Create-Taste halten, bis die LED schnell blinkt. Dann in `bluetoothctl`:
-
-```bash
-pair XX:XX:XX:XX:XX:XX
-trust XX:XX:XX:XX:XX:XX
-connect XX:XX:XX:XX:XX:XX
-scan off
-quit
-```
-
-Die Steuerung fragt beim Start nicht interaktiv nach einem Eingabegeraet, damit der systemd-Dienst nicht haengen bleibt. Falls automatisch das falsche Eingabegeraet gewaehlt wird, kann in `.env` optional `CONTROLLER_DEVICE_PATH=/dev/input/...` gesetzt werden.
-
-Controller abmelden:
-
-```text
-PS + Options
-```
-
-Falls die PS-Taste nicht als normales Linux-Event ankommt:
-
-```text
-Create/Share + Options
-```
-
-Die Tastenkombination stoppt Motor und Servo sofort, trennt den Controller wenn moeglich per Bluetooth und beendet den Controller-Dienst sauber. Wieder aktivieren:
-
-```bash
-sudo systemctl start vr-racer-controller.service
-```
-
-## Autostart nach Akkuwechsel
-
-Die Services starten nach einem Neustart automatisch:
-
-- `mediamtx.service` fuer den Low-Latency-Kamerastream, wenn MediaMTX installiert ist
-- `vr-racer-server.service` fuer den HTTPS-App-Server
-- `vr-racer-controller.service` fuer die PS5-Controller-Steuerung
-
-Der alte Cloudflare-Tunnel wird vom Installer deaktiviert und nicht mehr eingerichtet. Die App wird lokal im WLAN ueber die Pi-IP aufgerufen.
-
-Installation auf dem Raspberry Pi:
+- `mediamtx.service`: Kamera-Stream.
+- `vr-racer-server.service`: HTTPS-Webseite.
+- `vr-racer-controller.service`: PS5-Controller-Steuerung.
 
 ```bash
 cd ~/VR_Racer
@@ -246,9 +370,7 @@ chmod +x scripts/*.sh
 ./scripts/install_autostart.sh
 ```
 
-Der Installer deaktiviert den alten Cloudflare-Tunnel, installiert MediaMTX falls noetig und aktiviert alle benoetigten lokalen Services.
-
-Direkt starten, ohne neu zu booten:
+Direkt starten:
 
 ```bash
 sudo systemctl start mediamtx.service
@@ -256,26 +378,266 @@ sudo systemctl start vr-racer-server.service
 sudo systemctl start vr-racer-controller.service
 ```
 
-Status und Logs pruefen:
+Nach einem Reboot starten die Services automatisch:
+
+```bash
+sudo reboot
+```
+
+## 9. Webseite starten und testen
+
+Status prüfen:
 
 ```bash
 systemctl status mediamtx.service
 systemctl status vr-racer-server.service
 systemctl status vr-racer-controller.service
-
-journalctl -u mediamtx.service -f
-journalctl -u vr-racer-server.service -f
-journalctl -u vr-racer-controller.service -f
 ```
 
-Aufruf im lokalen Netzwerk:
+Webseite aufrufen:
+
+```text
+https://vrracer.local:8443
+```
+
+Direkten MediaMTX Stream testen:
+
+```text
+https://vrracer.local:8889/cam
+```
+
+Wenn `vrracer.local` nicht geht, die IP nutzen:
+
+```bash
+hostname -I
+```
 
 ```text
 https://<pi-ip>:8443
+https://<pi-ip>:8889/cam
 ```
 
-Auf dem Pi selbst geht auch:
+## 10. Vision Pro nutzen
+
+1. Vision Pro und Pi müssen im gleichen Netzwerk sein.
+2. Zertifikat `vrracer.crt` muss auf der Vision Pro vertraut sein.
+3. Safari auf der Vision Pro öffnen.
+4. `https://vrracer.local:8443` öffnen.
+5. Einloggen.
+6. Stream starten.
+7. VR/WebXR-Modus aktivieren.
+
+Aktuelle WebXR-Schärfe-Defaults im Code:
 
 ```text
-https://localhost:8443
+xrFramebufferScale=1.6
+xrCinemaScale=1.0
+xrDistance=3.2
+```
+
+## 11. Neuen PS5 Controller koppeln
+
+### 11.1 Wenn der Controller vorher mit dem Mac gekoppelt war
+
+Auf dem Mac den Controller aus Bluetooth entfernen:
+
+1. macOS Systemeinstellungen öffnen.
+2. Bluetooth öffnen.
+3. `DualSense Wireless Controller` suchen.
+4. Gerät entfernen oder ignorieren.
+
+macOS hat keinen verlässlichen Standard-Bash-Befehl zum Entkoppeln von Bluetooth-Geräten. Deshalb ist der GUI-Weg auf dem Mac am sichersten.
+
+### 11.2 Controller auf dem Pi koppeln
+
+Controller in Pairing-Modus bringen: `PS-Taste + Create/Share-Taste` halten, bis die LED schnell blinkt.
+
+Auf dem Pi:
+
+```bash
+bluetoothctl
+```
+
+In `bluetoothctl`:
+
+```text
+power on
+agent on
+default-agent
+scan on
+```
+
+Wenn der Controller angezeigt wird, die MAC-Adresse merken, z. B. `AA:BB:CC:DD:EE:FF`. Dann:
+
+```text
+pair AA:BB:CC:DD:EE:FF
+trust AA:BB:CC:DD:EE:FF
+connect AA:BB:CC:DD:EE:FF
+scan off
+quit
+```
+
+Controller-Service neu starten:
+
+```bash
+sudo systemctl restart vr-racer-controller.service
+journalctl -u vr-racer-controller.service -f
+```
+
+Im Log sollte stehen:
+
+```text
+Verbunden mit: DualSense Wireless Controller
+Lenkung ABS_X: min=0 center=127.5 max=255
+L2: min=0 neutral=0 max=255 richtung=normal
+R2: min=0 neutral=0 max=255 richtung=normal
+```
+
+### 11.3 Controller-Rechte setzen
+
+Falls keine Controller- oder GPIO-Rechte vorhanden sind:
+
+```bash
+sudo usermod -aG input,gpio vrracersbs
+```
+
+Danach neu einloggen oder rebooten:
+
+```bash
+sudo reboot
+```
+
+### 11.4 Controller per Tastenkombination abmelden
+
+Motor und Servo stoppen und Controller-Steuerung beenden:
+
+```text
+PS + Options
+```
+
+Falls die PS-Taste nicht erkannt wird:
+
+```text
+Create/Share + Options
+```
+
+Controller-Service wieder starten:
+
+```bash
+sudo systemctl start vr-racer-controller.service
+```
+
+## 12. Updates vom GitHub Repo auf dem Pi holen
+
+Normaler Update-Ablauf:
+
+```bash
+cd ~/VR_Racer
+git pull
+sudo systemctl restart vr-racer-server.service
+sudo systemctl restart vr-racer-controller.service
+```
+
+Wenn `.env` lokale Änderungen blockiert und die GitHub-Version genutzt werden soll:
+
+```bash
+cd ~/VR_Racer
+git checkout -- .env
+git pull
+sudo systemctl restart vr-racer-server.service
+sudo systemctl restart vr-racer-controller.service
+```
+
+Wenn `configs/mediamtx.yml` aktualisiert wurde:
+
+```bash
+cd ~/VR_Racer
+git pull
+sudo cp configs/mediamtx.yml /etc/mediamtx/mediamtx.yml
+sudo systemctl restart mediamtx.service
+```
+
+## 13. Fehlerdiagnose
+
+### 13.1 Webseite geht nicht
+
+```bash
+systemctl status vr-racer-server.service
+journalctl -u vr-racer-server.service -f
+```
+
+### 13.2 Stream geht nicht
+
+```bash
+systemctl status mediamtx.service
+journalctl -u mediamtx.service -f
+```
+
+Direkt testen:
+
+```text
+https://vrracer.local:8889/cam
+```
+
+### 13.3 Controller geht nicht
+
+```bash
+systemctl status vr-racer-controller.service
+journalctl -u vr-racer-controller.service -f
+```
+
+Input-Geräte anzeigen:
+
+```bash
+ls -l /dev/input/
+cat /proc/bus/input/devices
+```
+
+Wenn Motion-Sensor statt Gamepad genutzt wird, sicherstellen:
+
+```env
+CONTROLLER_DEVICE_PATH=
+```
+
+### 13.4 Auto lenkt falsch herum
+
+In `.env` setzen:
+
+```env
+STEERING_INVERTED=1
+```
+
+Danach:
+
+```bash
+sudo systemctl restart vr-racer-controller.service
+```
+
+### 13.5 Auto ist zu schnell
+
+In `.env` reduzieren:
+
+```env
+MOTOR_MAX_SPEED=0.45
+```
+
+Danach:
+
+```bash
+sudo systemctl restart vr-racer-controller.service
+```
+
+## 14. Schnellstart nach erfolgreicher Installation
+
+```bash
+cd ~/VR_Racer
+sudo systemctl restart mediamtx.service
+sudo systemctl restart vr-racer-server.service
+sudo systemctl restart vr-racer-controller.service
+```
+
+Dann auf der Vision Pro:
+
+```text
+https://vrracer.local:8443
 ```

@@ -26,11 +26,13 @@ paths:
   cam:
     source: rpiCamera
     rpiCameraCamID: 0
+    # 4:3 zeigt mehr von der Strecke ober- und unterhalb des Horizonts
+    # als 16:9. Das hilft beim Fahren, kostet aber etwas mehr Bandbreite.
     rpiCameraWidth: 1280
-    rpiCameraHeight: 720
+    rpiCameraHeight: 960
     rpiCameraFPS: 30
     rpiCameraCodec: auto
-    rpiCameraBitrate: 4000000
+    rpiCameraBitrate: 4500000
     rpiCameraIDRPeriod: 30
     rpiCameraHardwareH264Profile: baseline
     rpiCameraSoftwareH264Profile: baseline
