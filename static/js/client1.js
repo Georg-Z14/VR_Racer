@@ -45,7 +45,7 @@ const XR_VERTICAL_ALIGN = Math.min(0.06, Math.max(-0.06, readSignedXrNumberParam
 const XR_SWAP_EYES = readXrBoolParam("xrSwapEyes", false);
 const XR_STEREO_ENABLED = readXrBoolParam("xrStereo", false);
 const XR_MONO = !XR_STEREO_ENABLED;
-const THREE_MODULE_URL = "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js";
+const THREE_MODULE_URL = "/static/js/vendor/three.module.js";
 const WEBRTC_VIDEO_CODEC = (new URLSearchParams(window.location.search).get("codec") || "h264").toLowerCase();
 let vrEyeAspect = DEFAULT_VR_EYE_ASPECT;
 
